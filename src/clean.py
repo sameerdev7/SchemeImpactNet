@@ -1,45 +1,33 @@
 """
 clean.py
 --------
-Cleans and standardizes MNREGA data.
-
-Handles the realistic schema:
-    state, district, financial_year,
-    households_demanded, households_offered, households_availed,
-    person_days_lakhs, expenditure_lakhs, avg_wage_rate, works_completed
+Cleans and standardizes the unified MNREGA dataset.
+Works for Stage 1 (Maharashtra) through Stage 3 (All-India + scheme data).
 """
 
 import pandas as pd
 import numpy as np
 
-NUMERIC_COLS = [
-    "households_demanded", "households_offered", "households_availed",
-    "person_days_lakhs", "expenditure_lakhs", "avg_wage_rate", "works_completed"
-]
+CRITICAL_COLS = ["person_days_lakhs", "expenditure_lakhs", "avg_wage_rate"]
 
-REQUIRED_COLS = {
-    "state", "district", "financial_year",
-    "person_days_lakhs", "expenditure_lakhs"
-}
+NON_CRITICAL_COLS = [
+    "households_demanded", "households_offered", "households_availed",
+    "works_completed", "rainfall_mm", "crop_season_index",
+    "rural_population_lakhs", "poverty_rate_pct",
+    "pmkisan_beneficiaries", "pmkisan_amount_lakhs",
+    "pmay_houses_sanctioned", "pmay_houses_completed",
+    "pmay_expenditure_lakhs", "budget_allocated_lakhs"
+]
 
 
 def clean(df: pd.DataFrame) -> pd.DataFrame:
     print("[clean] Starting cleaning pipeline...")
-    df = _standardize_columns(df)
     df = _strip_strings(df)
     df = _parse_financial_year(df)
     df = _cast_numerics(df)
     df = _handle_missing(df)
+    df = _enforce_logical_constraints(df)
     print(f"[clean] Done. Shape: {df.shape}")
-    return df
-
-
-def _standardize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
-    missing = REQUIRED_COLS - set(df.columns)
-    if missing:
-        raise ValueError(f"[clean] Missing required columns: {missing}")
-    print(f"[clean] Columns: {list(df.columns)}")
     return df
 
 
@@ -61,7 +49,8 @@ def _parse_financial_year(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _cast_numerics(df: pd.DataFrame) -> pd.DataFrame:
-    for col in NUMERIC_COLS:
+    all_numeric = CRITICAL_COLS + NON_CRITICAL_COLS
+    for col in all_numeric:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
@@ -69,29 +58,41 @@ def _cast_numerics(df: pd.DataFrame) -> pd.DataFrame:
 
 def _handle_missing(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Strategy:
-    - Critical cols (person_days_lakhs, expenditure_lakhs): forward-fill
-      within district, drop if still null.
-    - Non-critical cols (households_*, works_completed): forward-fill,
-      leave remaining NaN — not dropped, model handles them.
+    Critical cols   → forward-fill within district, drop if still null.
+    Non-critical    → forward-fill within district, leave remaining NaN.
     """
-    df = df.sort_values(["district", "financial_year"])
+    df = df.sort_values(["state", "district", "financial_year"])
 
-    critical = ["person_days_lakhs", "expenditure_lakhs"]
-    non_critical = ["households_demanded", "households_offered",
-                    "households_availed", "works_completed"]
-
-    for col in critical + non_critical:
-        if col in df.columns:
-            before = df[col].isna().sum()
-            df[col] = df.groupby("district")[col].transform(lambda s: s.ffill())
+    for col in CRITICAL_COLS + NON_CRITICAL_COLS:
+        if col not in df.columns:
+            continue
+        before = df[col].isna().sum()
+        if before > 0:
+            df[col] = df.groupby(["state", "district"])[col].transform(lambda s: s.ffill())
             filled = before - df[col].isna().sum()
             if filled > 0:
                 print(f"[clean] '{col}': forward-filled {filled} value(s)")
 
     before = len(df)
-    df = df.dropna(subset=critical).reset_index(drop=True)
+    df = df.dropna(subset=CRITICAL_COLS).reset_index(drop=True)
     if len(df) < before:
         print(f"[clean] Dropped {before - len(df)} rows with unresolvable critical nulls")
+
+    return df
+
+
+def _enforce_logical_constraints(df: pd.DataFrame) -> pd.DataFrame:
+    """Clip any constraint violations that slipped through generation."""
+    if all(c in df.columns for c in ["households_offered", "households_demanded"]):
+        violations = (df["households_offered"] > df["households_demanded"]).sum()
+        if violations:
+            df["households_offered"] = df[["households_offered", "households_demanded"]].min(axis=1)
+            print(f"[clean] Fixed {violations} households_offered > households_demanded")
+
+    if all(c in df.columns for c in ["households_availed", "households_offered"]):
+        violations = (df["households_availed"] > df["households_offered"]).sum()
+        if violations:
+            df["households_availed"] = df[["households_availed", "households_offered"]].min(axis=1)
+            print(f"[clean] Fixed {violations} households_availed > households_offered")
 
     return df

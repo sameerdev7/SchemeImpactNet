@@ -1,67 +1,88 @@
 """
 pipeline.py
 -----------
-Orchestrates the full Stage 1 pipeline:
-    generate → extract → clean → features → eda → model → save
+Stage-aware pipeline orchestrator.
+
+Stage 1: Maharashtra only  → python main.py --stage 1
+Stage 2: All-India         → python main.py --stage 2
+Stage 3: All-India + schemes → python main.py --stage 3
 """
 
 import os
 import pandas as pd
 
-from src.generate_synthetic import generate, save as save_raw
 from src.extract import load_csv
 from src.clean import clean
 from src.features import build_features
 from src.eda import run_eda
 from src.model import run_model
 
-RAW_PATH       = os.path.join("data", "raw", "mnrega_maharashtra_synthetic.csv")
+RAW_PATH       = os.path.join("data", "raw", "mnrega_india_unified.csv")
 PROCESSED_PATH = os.path.join("data", "processed", "mnrega_cleaned.csv")
 
+STATE_FILTER = {
+    1: "Maharashtra",   # Stage 1: single state
+    2: None,            # Stage 2: all-India
+    3: None,            # Stage 3: all-India + scheme features
+}
 
-def run_pipeline(skip_generate: bool = False) -> pd.DataFrame:
+SCOPE_LABEL = {
+    1: "Maharashtra",
+    2: "All-India",
+    3: "All-India (with Scheme Interdependency)",
+}
+
+
+def run_pipeline(stage: int = 1) -> pd.DataFrame:
+    assert stage in [1, 2, 3], "Stage must be 1, 2, or 3"
+
     print("\n" + "=" * 60)
-    print("  SchemeImpactNet — Stage 1 Pipeline")
+    print(f"  SchemeImpactNet — Stage {stage} Pipeline")
+    print(f"  Scope : {SCOPE_LABEL[stage]}")
     print("=" * 60)
 
-    # Step 1: Generate synthetic data (skip if real data exists)
-    if not skip_generate or not os.path.exists(RAW_PATH):
-        print("\n[pipeline] Step 1: Generating synthetic data...")
-        raw_df = generate()
-        save_raw(raw_df, RAW_PATH)
-    else:
-        print(f"\n[pipeline] Step 1: Using existing data at {RAW_PATH}")
+    # ── Extract ───────────────────────────────────────────────────
+    print(f"\n[pipeline] Step 1: Extract")
+    df = load_csv(RAW_PATH, state_filter=STATE_FILTER[stage])
 
-    # Step 2: Extract
-    print("\n[pipeline] Step 2: Extract")
-    raw_df = load_csv(RAW_PATH)
+    # ── Clean ─────────────────────────────────────────────────────
+    print(f"\n[pipeline] Step 2: Clean")
+    df = clean(df)
 
-    # Step 3: Clean
-    print("\n[pipeline] Step 3: Clean")
-    clean_df = clean(raw_df)
+    # ── Features ──────────────────────────────────────────────────
+    print(f"\n[pipeline] Step 3: Feature Engineering")
+    df = build_features(df)
 
-    # Step 4: Features
-    print("\n[pipeline] Step 4: Feature Engineering")
-    feature_df = build_features(clean_df)
-
-    # Step 5: Save processed data
+    # ── Save processed ────────────────────────────────────────────
     os.makedirs(os.path.dirname(PROCESSED_PATH), exist_ok=True)
-    feature_df.to_csv(PROCESSED_PATH, index=False)
+    df.to_csv(PROCESSED_PATH, index=False)
     print(f"\n[pipeline] Processed data saved → {PROCESSED_PATH}")
 
-    # Step 6: EDA
-    print("\n[pipeline] Step 5: EDA")
-    run_eda(feature_df)
+    # ── EDA ───────────────────────────────────────────────────────
+    print(f"\n[pipeline] Step 4: EDA")
+    run_eda(df, scope=SCOPE_LABEL[stage])
 
-    # Step 7: Model
-    print("\n[pipeline] Step 6: Model")
-    predictions = run_model(feature_df)
+    # ── Model ─────────────────────────────────────────────────────
+    print(f"\n[pipeline] Step 5: Model")
+    predictions = run_model(df)
 
     print("\n" + "=" * 60)
-    print("  Pipeline Complete!")
-    print(f"  Processed data : {PROCESSED_PATH}")
-    print(f"  Figures        : reports/figures/")
-    print(f"  Predictions    : data/processed/mnrega_predictions.csv")
+    print(f"  Stage {stage} Complete!")
+    print(f"  Processed : {PROCESSED_PATH}")
+    print(f"  Figures   : reports/figures/")
+    print(f"  Predictions: data/processed/mnrega_predictions.csv")
+    print(f"  Report    : reports/model_report.txt")
     print("=" * 60 + "\n")
 
     return predictions
+
+
+def run_optimizer_step(scope_state: str = None) -> None:
+    """Run the budget optimizer — called as part of Stage 3."""
+    from src.optimize import run_optimizer
+    run_optimizer(
+        predictions_path=os.path.join("data", "processed", "mnrega_predictions.csv"),
+        raw_path=RAW_PATH,
+        scope_state=scope_state,
+        target_year=2023,
+    )

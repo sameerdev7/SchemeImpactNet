@@ -172,13 +172,13 @@ Some districts generate 50 persondays per ₹1000 spent. Others generate 20. Why
 3. Resource Optimization — "Where should budget go to maximize employment generated?"
 Given a fixed budget, which districts should get more funding to maximize total persondays across Maharashtra?
 
+-----------------------------------------------------------------
+Stage 3 (Corrected Plan)
 
-What Stage 1 actually delivers
-Just question 1 and 2, on Maharashtra, with simple models:
+Linear programming optimization (PuLP)
 
-A trained model that can say "Nashik district will generate X lakh persondays in 2024-25"
-An analysis that shows which districts are efficient vs wasteful
-A baseline to measure everything else against
+Budget reallocation simulation
 
-That's it. That's the honest, useful, demonstrable thing.
-Questions 3 onward is Stage 2/3 territory.
+Decision dashboard
+
+This is necessary.

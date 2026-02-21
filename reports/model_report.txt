@@ -1,0 +1,27 @@
+SchemeImpactNet — Model Report
+==================================================
+Model     : XGBRegressor
+Test years: [2022, 2023]
+RMSE      : 0.4992
+MAE       : 0.3544
+R2        : 0.9967
+
+Features used:
+  - financial_year
+  - avg_wage_rate
+  - lag_person_days
+  - lag_expenditure
+  - expenditure_per_personday
+  - yoy_growth
+  - district_avg_persondays
+  - demand_fulfillment_rate
+  - district_encoded
+  - state_encoded
+  - rainfall_mm
+  - crop_season_index
+  - rural_population_lakhs
+  - poverty_rate_pct
+  - drought_flag
+  - high_poverty_flag
+  - scheme_overlap_score
+  - budget_utilization_rate
