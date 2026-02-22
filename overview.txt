@@ -59,100 +59,6 @@ To visualize the high-level structure, here's a text-based diagram representing 
 
 This elaborate overview positions SchemeImpactNet as a cutting-edge project that not only impresses with its technical sophistication but also its potential societal impact. If diagrams are crucial, I can suggest generating one via tools like Draw.io or Python's Matplotlib in your code—e.g., a simple flowchart script you can run locally. Let me know if you'd like code snippets for that!
 
------------------------------------------------------------------------------------------------ 
-
-Week 1 — Data Pipeline (MOST IMPORTANT)
-
-Goal: Build reliable data ingestion + cleaning pipeline
-
-Step 1: Choose Data Sources
-
-Primary:
-
-MNREGA district-level yearly data (2015–2023)
-
-Optional Add-ons:
-
-Rainfall (IMD or public dataset)
-
-Population (Census)
-
-Poverty rate (if available)
-
-Week 2 — Forecasting Model
-
-Target variable:
-
-persondays_generated_next_year
-
-Model:
-
-Linear Regression (baseline)
-
-XGBoost
-
-Metrics:
-
-RMSE
-
-MAE
-
-R²
-
-Week 3 — Optimization
-
-Problem:
-
-Maximize predicted employment
-Subject to:
-
-Total budget constraint
-
-Minimum allocation per district
-
-Use:
-
-PuLP
-
-Week 4 — Dashboard
-
-Use:
-
-Streamlit
-
-Plotly
-
-GeoPandas
-
-Add:
-
-District heatmap
-
-Budget slider
-
-Prediction chart
-
-Optimized allocation vs current allocation
-
-🚀 NOW: Build Data Pipeline Prototype
-
-We will test only this:
-
-Load MNREGA CSV
-
-Clean
-
-Standardize columns
-
-Handle missing values
-
-Create basic features
-
-Save cleaned dataset
-
-If this works → green signal.
-
---------------------------------------------------------------------------- 
 
 The core problem
 India spends ₹70,000–90,000 crore per year on MNREGA alone. But nobody can reliably answer questions like:
@@ -172,13 +78,15 @@ Some districts generate 50 persondays per ₹1000 spent. Others generate 20. Why
 3. Resource Optimization — "Where should budget go to maximize employment generated?"
 Given a fixed budget, which districts should get more funding to maximize total persondays across Maharashtra?
 
------------------------------------------------------------------
-Stage 3 (Corrected Plan)
 
-Linear programming optimization (PuLP)
 
-Budget reallocation simulation
+-----------------------------------------------------------------------------------------------------
 
-Decision dashboard
-
-This is necessary.
+3. Data Sources and Processing
+The dataset used in this study combines real government data with domain-informed estimates to produce a comprehensive district-level MNREGA dataset spanning 2014-15 to 2024-25 across 759 districts and 34 states.
+Primary Source — MNREGA Employment Data: Person days generated and households engaged in work were sourced from the Ministry of Rural Development's official MIS portal via Dataful.in (Dataset ID: 20063), which aggregates monthly district-level records from nreganarep.nic.in. Monthly figures were summed to produce annual totals. Person days were converted from absolute numbers to lakh units by dividing by 100,000.
+Wage and Expenditure Derivation: District-level expenditure was derived using MoRD's officially notified state wage rates, which are revised annually. Expenditure in Rs. lakhs was computed as the product of person days (lakhs) and the prevailing wage rate (Rs./day). Budget allocated was estimated as expenditure divided by 0.89, reflecting the national average budget utilization rate of approximately 89%.
+Rainfall Data: Annual subdivision-level rainfall data was sourced from the India Meteorological Department (IMD) historical dataset covering 1901-2017. IMD meteorological subdivisions were mapped to states. For years 2018-2024 where IMD data was unavailable, rainfall was estimated using each subdivision's 2000-2017 average with ±5% stochastic variation using a fixed random seed for reproducibility.
+Demographic and Poverty Data: Rural population figures were derived from Census of India 2011 state-level rural headcounts, distributed across districts proportional to each district's share of state-level person days. A 1.2% annual growth rate was applied to project values from 2011 to 2024. Poverty rates were sourced from NITI Aayog's National Multidimensional Poverty Index (MPI) 2021 report, with district-level variation introduced based on relative MNREGA activity.
+Scheme Interdependency Features: PM-KISAN beneficiary estimates were computed from rural population assuming 35% farmer household penetration from 2019-20 onwards (scheme launch year), scaled by district activity. PMAY-G housing figures were estimated from 2016-17 onwards using poverty-weighted rural population ratios, with completion rates linearly interpolated from 30% (2016-17) to 85% (2023-24) based on reported national progress.
+Final Dataset: 7,758 district-year observations, 22 features, zero missing values.

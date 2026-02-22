@@ -6,7 +6,7 @@ XGBoost model to predict next year's person_days_lakhs per district.
 Stage 1: Maharashtra features only
 Stage 2+: Automatically uses extra features when present
 
-Temporal split: train on years up to 2021, test on 2022–2023.
+Temporal split: train on years up to 2023, test on 2024.
 This strictly mimics real forecasting — never train on future data.
 
 Switch to XGBoost from sklearn by changing MODEL_BACKEND = "xgboost"
@@ -46,8 +46,8 @@ ALL_FEATURE_COLS = [
     "scheme_overlap_score", "budget_utilization_rate",
 ]
 
-TRAIN_YEARS = [2015, 2016, 2017, 2018, 2019, 2020, 2021]
-TEST_YEARS  = [2022, 2023]
+TRAIN_YEARS = [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023]
+TEST_YEARS  = [2024]
 
 
 def run_model(df: pd.DataFrame) -> pd.DataFrame:

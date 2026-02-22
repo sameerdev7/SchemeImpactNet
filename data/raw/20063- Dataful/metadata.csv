@@ -1,0 +1,10 @@
+organisation,Ministry of Rural Development
+sectors,"Labour and Employment, Rural Development"
+updated_frequency,Monthly
+granularity,"All India, Year, Month"
+time_saved,6 hours
+source,"MoRD: NREGA Statistics"
+source_link,"https://nreganarep.nic.in/netnrega/MISreport4.aspx"
+time_period,"2014-15 to 2025-26"
+units,"value in absolute number"
+citation,"Ministry of Rural Development. MNREGA: Year-, Month-, State- and District-wise Total Persondays and Households engaged in Work [Data set]. Dataful. https://dataful.in/dataset/20063"
