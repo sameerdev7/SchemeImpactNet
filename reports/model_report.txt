@@ -1,10 +1,10 @@
 SchemeImpactNet — Model Report
 ==================================================
-Model     : XGBRegressor
+Model     : GradientBoostingRegressor
 Test years: [2024]
-RMSE      : 2.3301
-MAE       : 1.3795
-R2        : 0.9963
+RMSE      : 1.9383
+MAE       : 1.1863
+R2        : 0.9975
 
 Features used:
   - financial_year

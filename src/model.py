@@ -21,7 +21,7 @@ from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.preprocessing import LabelEncoder
 
-MODEL_BACKEND = "xgboost"   # "sklearn" | "xgboost"
+MODEL_BACKEND = "compare"   # "sklearn" | "xgboost"
 
 FIGURES_DIR = os.path.join("reports", "figures")
 OUTPUT_DIR  = os.path.join("data", "processed")
