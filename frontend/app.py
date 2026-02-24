@@ -2,10 +2,7 @@
 frontend/app.py
 ---------------
 SchemeImpactNet — Dashboard Landing Page.
-
-Design: Government data meets mission control.
-Tightrope between institutional authority and live-data energy.
-No brochure text. Pure signal.
+Light professional theme. Crimson Pro + DM Sans.
 """
 
 import streamlit as st
@@ -13,233 +10,213 @@ import requests
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+import sys, os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 st.set_page_config(
     page_title="SchemeImpactNet",
     page_icon="◈",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 API = "http://localhost:8000"
 
-# ── Fonts + Global CSS ─────────────────────────────────────────────────────────
-st.markdown("""
+CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Syne+Mono&family=DM+Sans:wght@300;400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,400;0,600;0,700;1,400&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
 
 html, body, [class*="css"] {
     font-family: 'DM Sans', sans-serif;
-    background: #070D1A;
+    background-color: #F8FAFC;
+    color: #1E293B;
 }
+#MainMenu, footer, header { visibility: hidden; }
+.block-container { padding-top: 2rem !important; padding-bottom: 2rem !important; }
+[data-testid="stSidebar"] { background: #FFFFFF; border-right: 1px solid #E2E8F0; }
 
-/* ── Brand bar ── */
-.brand {
-    display: flex;
-    align-items: baseline;
-    gap: 12px;
-    margin-bottom: 4px;
-}
-.brand-mark {
-    font-family: 'Syne Mono', monospace;
-    font-size: 0.75rem;
-    color: #3B6FE8;
-    letter-spacing: 3px;
+/* Brand */
+.brand-wrap { border-bottom: 2px solid #E2E8F0; padding-bottom: 1.5rem; margin-bottom: 1.75rem; }
+.brand-eyebrow {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.62rem;
+    letter-spacing: 4px;
     text-transform: uppercase;
-    padding: 3px 8px;
-    border: 1px solid rgba(59,111,232,0.4);
-    border-radius: 2px;
+    color: #2563EB;
+    margin-bottom: 8px;
 }
-.brand-title {
-    font-family: 'Syne', sans-serif;
-    font-size: 2.6rem;
-    font-weight: 800;
-    color: #F0F4FF;
-    letter-spacing: -1.5px;
+.brand-name {
+    font-family: 'Crimson Pro', serif;
+    font-size: 2.8rem;
+    font-weight: 700;
+    color: #1E293B;
     line-height: 1;
     margin: 0;
 }
-.brand-title span {
-    color: #3B6FE8;
-}
-.brand-sub {
-    font-family: 'DM Sans', sans-serif;
-    font-size: 0.78rem;
-    color: #4A5568;
-    letter-spacing: 2.5px;
-    text-transform: uppercase;
+.brand-name span { color: #2563EB; }
+.brand-tagline {
+    font-size: 0.82rem;
+    color: #64748B;
     margin-top: 6px;
-    margin-bottom: 0;
+    letter-spacing: 0.3px;
 }
 
-/* ── Live indicator ── */
-.live-dot {
-    display: inline-block;
-    width: 6px;
-    height: 6px;
-    background: #22C55E;
-    border-radius: 50%;
-    margin-right: 6px;
-    animation: pulse 2s infinite;
-    vertical-align: middle;
-}
-@keyframes pulse {
-    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34,197,94,0.4); }
-    50%       { opacity: 0.8; box-shadow: 0 0 0 5px rgba(34,197,94,0); }
-}
+/* Status bar */
 .status-bar {
-    font-family: 'Syne Mono', monospace;
+    font-family: 'DM Mono', monospace;
     font-size: 0.68rem;
-    color: #4A5568;
-    letter-spacing: 1px;
-    margin-bottom: 1.5rem;
+    color: #94A3B8;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 1.75rem;
 }
-.status-bar .ok { color: #22C55E; }
-.status-bar .sep { margin: 0 12px; color: #2D3748; }
+.s-live  { color: #16A34A; font-weight: 600; }
+.s-off   { color: #DC2626; font-weight: 600; }
+.s-sep   { color: #CBD5E1; }
 
-/* ── KPI strip ── */
+/* KPI strip */
 .kpi-row {
     display: grid;
     grid-template-columns: repeat(5, 1fr);
     gap: 1px;
-    background: rgba(255,255,255,0.04);
-    border: 1px solid rgba(255,255,255,0.05);
-    border-radius: 10px;
+    background: #E2E8F0;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
     overflow: hidden;
-    margin-bottom: 1.5rem;
+    margin-bottom: 2rem;
 }
-.kpi-cell {
-    background: #0B1224;
-    padding: 1.1rem 1.2rem;
-    position: relative;
-}
-.kpi-cell::after {
-    content: '';
-    position: absolute;
-    bottom: 0; left: 1.2rem; right: 1.2rem;
-    height: 1px;
-    background: rgba(59,111,232,0);
-    transition: background 0.3s;
-}
-.kpi-cell:hover::after { background: rgba(59,111,232,0.4); }
+.kpi-cell { background: #FFFFFF; padding: 1.2rem 1.4rem; }
 .kpi-num {
-    font-family: 'Syne', sans-serif;
-    font-size: 1.5rem;
+    font-family: 'Crimson Pro', serif;
+    font-size: 1.9rem;
     font-weight: 700;
-    color: #E8F0FE;
+    color: #1E293B;
     line-height: 1;
-    margin-bottom: 4px;
+    margin-bottom: 3px;
 }
-.kpi-num.accent { color: #3B6FE8; }
-.kpi-num.green  { color: #4ADE80; }
-.kpi-num.amber  { color: #FBBF24; }
+.kpi-num.blue   { color: #2563EB; }
+.kpi-num.green  { color: #16A34A; }
+.kpi-num.amber  { color: #D97706; }
 .kpi-label {
-    font-size: 0.63rem;
+    font-size: 0.65rem;
     text-transform: uppercase;
     letter-spacing: 1.5px;
-    color: #4A5568;
+    color: #94A3B8;
+    font-weight: 500;
 }
 
-/* ── Section labels ── */
-.section-label {
-    font-family: 'Syne Mono', monospace;
-    font-size: 0.65rem;
+/* Section label */
+.sec-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.62rem;
     letter-spacing: 3px;
     text-transform: uppercase;
-    color: #3B6FE8;
-    margin-bottom: 8px;
+    color: #94A3B8;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #F1F5F9;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
 }
-.section-label::before {
+.sec-label::before {
     content: '';
     display: inline-block;
-    width: 16px;
-    height: 1px;
-    background: #3B6FE8;
+    width: 18px;
+    height: 2px;
+    background: #2563EB;
+    border-radius: 2px;
 }
 
-/* ── AI brief box ── */
-.ai-brief {
-    background: linear-gradient(135deg, rgba(11,18,36,0.98) 0%, rgba(20,35,70,0.95) 100%);
-    border: 1px solid rgba(59,111,232,0.25);
-    border-left: 3px solid #3B6FE8;
+/* Brief box */
+.brief-box {
+    background: #EFF6FF;
+    border: 1px solid #BFDBFE;
+    border-left: 4px solid #2563EB;
     border-radius: 10px;
-    padding: 1.4rem 1.6rem;
+    padding: 1.4rem 1.8rem;
     margin-bottom: 1.5rem;
-    position: relative;
-    overflow: hidden;
 }
-.ai-brief::before {
-    content: '';
-    position: absolute;
-    top: 0; right: 0;
-    width: 200px; height: 200px;
-    background: radial-gradient(circle, rgba(59,111,232,0.06) 0%, transparent 70%);
-    border-radius: 50%;
-    transform: translate(50%, -50%);
-}
-.ai-brief-tag {
-    font-family: 'Syne Mono', monospace;
+.brief-label {
+    font-family: 'DM Mono', monospace;
     font-size: 0.6rem;
     letter-spacing: 2px;
-    color: #3B6FE8;
     text-transform: uppercase;
+    color: #2563EB;
     margin-bottom: 10px;
-    opacity: 0.9;
 }
-.ai-brief-text {
-    font-size: 0.92rem;
-    color: #94A3B8;
-    line-height: 1.7;
+.brief-text {
+    font-family: 'Crimson Pro', serif;
+    font-size: 1.05rem;
+    color: #1E3A5F;
+    line-height: 1.75;
 }
-.ai-brief-text strong { color: #CBD5E1; font-weight: 500; }
+.brief-text strong { color: #1E293B; font-weight: 600; }
 
-/* ── Insight cards ── */
-.card-grid { display: flex; flex-direction: column; gap: 10px; }
+/* Insight cards */
 .icard {
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
     border-radius: 10px;
-    padding: 1rem 1.2rem;
-    border: 1px solid;
+    padding: 1.1rem 1.3rem;
+    margin-bottom: 10px;
+    border-left: 4px solid transparent;
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: 1.1rem;
 }
-.icard-red    { background: rgba(239,68,68,0.06);  border-color: rgba(239,68,68,0.2); }
-.icard-yellow { background: rgba(251,191,36,0.06); border-color: rgba(251,191,36,0.2); }
-.icard-green  { background: rgba(74,222,128,0.06); border-color: rgba(74,222,128,0.2); }
-.icard-blue   { background: rgba(59,111,232,0.06); border-color: rgba(59,111,232,0.2); }
+.icard.red    { border-left-color: #DC2626; }
+.icard.amber  { border-left-color: #D97706; }
+.icard.green  { border-left-color: #16A34A; }
+.icard.blue   { border-left-color: #2563EB; }
 .icard-num {
-    font-family: 'Syne', sans-serif;
-    font-size: 2rem;
+    font-family: 'Crimson Pro', serif;
+    font-size: 1.9rem;
     font-weight: 700;
     line-height: 1;
-    min-width: 52px;
+    min-width: 56px;
     text-align: right;
 }
-.icard-red    .icard-num { color: #F87171; }
-.icard-yellow .icard-num { color: #FBBF24; }
-.icard-green  .icard-num { color: #4ADE80; }
-.icard-blue   .icard-num { color: #60A5FA; }
-.icard-body {}
+.icard.red   .icard-num { color: #DC2626; }
+.icard.amber .icard-num { color: #D97706; }
+.icard.green .icard-num { color: #16A34A; }
+.icard.blue  .icard-num { color: #2563EB; }
 .icard-title {
-    font-size: 0.78rem;
+    font-size: 0.77rem;
     font-weight: 600;
-    color: #E2E8F0;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: #475569;
     margin-bottom: 2px;
-    letter-spacing: 0.2px;
 }
-.icard-sub { font-size: 0.7rem; color: #4A5568; }
+.icard-sub { font-size: 0.72rem; color: #94A3B8; }
 
-/* ── Hide Streamlit chrome ── */
-#MainMenu, footer, header { visibility: hidden; }
-.block-container { padding-top: 1.5rem !important; padding-bottom: 1rem !important; }
-[data-testid="stSidebar"] { background: #070D1A; }
+/* Bottom nav */
+.bot-nav {
+    border-top: 1px solid #E2E8F0;
+    padding-top: 1rem;
+    margin-top: 1rem;
+    font-size: 0.75rem;
+    color: #94A3B8;
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+}
+.bot-nav strong {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.62rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #CBD5E1;
+}
 </style>
-""", unsafe_allow_html=True)
+"""
 
-# ── API helpers ────────────────────────────────────────────────────────────────
+st.markdown(CSS, unsafe_allow_html=True)
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
 @st.cache_data(ttl=300)
 def api_get(endpoint, params=None):
     try:
@@ -253,41 +230,39 @@ def to_df(d):
     if not d: return pd.DataFrame()
     return pd.DataFrame(d) if isinstance(d, list) else pd.DataFrame([d])
 
-# ── Fetch data ─────────────────────────────────────────────────────────────────
-stats    = api_get("/districts/stats") or {}
-pred_raw = api_get("/predictions/")
-opt_raw  = api_get("/optimizer/results")
-pred_df  = to_df(pred_raw)
-opt_df   = to_df(opt_raw)
-
+# ── Fetch ──────────────────────────────────────────────────────────────────────
+stats   = api_get("/districts/stats") or {}
+pred_df = to_df(api_get("/predictions/"))
+opt_df  = to_df(api_get("/optimizer/results"))
 backend_ok = bool(stats)
 
-# ── Header ─────────────────────────────────────────────────────────────────────
+# ── Brand ──────────────────────────────────────────────────────────────────────
 st.markdown("""
-<div class="brand">
-    <span class="brand-mark">MNREGA · ML</span>
+<div class="brand-wrap">
+    <div class="brand-eyebrow">◈ MNREGA · Machine Learning · Policy Analytics</div>
+    <div class="brand-name">Scheme<span>Impact</span>Net</div>
+    <div class="brand-tagline">Predictive Impact Analysis &amp; Budget Optimisation Framework for India's Rural Employment Scheme</div>
 </div>
-<div class="brand-title">Scheme<span>Impact</span>Net</div>
-<p class="brand-sub">Predictive Impact Analysis & Budget Optimisation Framework · India</p>
 """, unsafe_allow_html=True)
 
-# Live status bar
-api_status = '<span class="ok">● LIVE</span>' if backend_ok else '<span style="color:#EF4444">● OFFLINE</span>'
 year_range = stats.get("year_range", "2015–2024")
-n_dist     = stats.get("total_districts", "725")
-n_states   = stats.get("total_states", "28")
+n_dist = stats.get("total_districts", "725")
+n_states = stats.get("total_states", "28")
+api_html = '<span class="s-live">● API LIVE</span>' if backend_ok else '<span class="s-off">● API OFFLINE</span>'
 
 st.markdown(f"""
 <div class="status-bar">
-    API {api_status}
-    <span class="sep">|</span>
+    {api_html}
+    <span class="s-sep">·</span>
     {n_dist} districts
-    <span class="sep">|</span>
+    <span class="s-sep">·</span>
     {n_states} states
-    <span class="sep">|</span>
+    <span class="s-sep">·</span>
     {year_range}
-    <span class="sep">|</span>
-    XGBoost · SciPy LP · FastAPI
+    <span class="s-sep">·</span>
+    XGBoost R²≈0.9963
+    <span class="s-sep">·</span>
+    SciPy LP Optimizer
 </div>
 """, unsafe_allow_html=True)
 
@@ -295,19 +270,18 @@ st.markdown(f"""
 total_pd  = stats.get("total_persondays_lakhs", 0)
 total_exp = stats.get("total_expenditure_lakhs", 0)
 covid_pct = stats.get("covid_spike_pct", 0)
+exp_cr    = total_exp / 1e4 if total_exp else 0
 
 nat_gain, gain_pct_val = 0.0, 0.0
 if not opt_df.empty and "persondays_gain" in opt_df.columns:
-    nat_gain     = opt_df["persondays_gain"].sum()
-    sq_sum       = opt_df["sq_persondays"].sum() if "sq_persondays" in opt_df.columns else 1
+    nat_gain  = opt_df["persondays_gain"].sum()
+    sq_sum    = opt_df["sq_persondays"].sum() if "sq_persondays" in opt_df.columns else 1
     gain_pct_val = nat_gain / sq_sum * 100 if sq_sum else 0
-
-exp_cr = total_exp / 1e4 if total_exp else 0
 
 st.markdown(f"""
 <div class="kpi-row">
     <div class="kpi-cell">
-        <div class="kpi-num accent">{int(n_dist)}</div>
+        <div class="kpi-num blue">{int(n_dist)}</div>
         <div class="kpi-label">Districts Covered</div>
     </div>
     <div class="kpi-cell">
@@ -320,7 +294,7 @@ st.markdown(f"""
     </div>
     <div class="kpi-cell">
         <div class="kpi-num amber">{covid_pct:+.1f}%</div>
-        <div class="kpi-label">COVID Spike (2020)</div>
+        <div class="kpi-label">COVID-20 Spike</div>
     </div>
     <div class="kpi-cell">
         <div class="kpi-num green">{gain_pct_val:+.2f}%</div>
@@ -329,12 +303,12 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# ── Main layout: map left | insights right ─────────────────────────────────────
+# ── Two column layout ──────────────────────────────────────────────────────────
 left_col, right_col = st.columns([3, 2], gap="large")
 
-# ───── LEFT: Mini spatial overview ────────────────────────────────────────────
+# ── LEFT: State bubble map ─────────────────────────────────────────────────────
 with left_col:
-    st.markdown('<div class="section-label">Spatial Distribution</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-label">State-Level Employment Distribution</div>', unsafe_allow_html=True)
 
     if not pred_df.empty:
         latest_yr = pred_df["financial_year"].max()
@@ -359,22 +333,22 @@ with left_col:
             "Delhi": (28.7, 77.1), "Puducherry": (11.9, 79.8),
         }
 
-        # State-level aggregation for the bubble map
         state_agg = latest.groupby("state").agg(
             person_days=("person_days_lakhs", "sum"),
-            predicted  =("predicted_persondays", "sum"),
+            predicted=("predicted_persondays", "sum"),
         ).reset_index()
 
         lats, lons, sizes, colors_v = [], [], [], []
+        rng = np.random.default_rng(42)
         for _, row in state_agg.iterrows():
             lat, lon = STATE_COORDS.get(row["state"], (20.0, 78.0))
-            lats.append(lat + np.random.uniform(-0.3, 0.3))
-            lons.append(lon + np.random.uniform(-0.3, 0.3))
+            lats.append(lat + rng.uniform(-0.2, 0.2))
+            lons.append(lon + rng.uniform(-0.2, 0.2))
             sizes.append(row["person_days"])
             colors_v.append(row["person_days"])
 
         vmin, vmax = min(sizes), max(sizes)
-        bubble_sizes = [np.clip((v - vmin) / (vmax - vmin) * 28 + 6, 6, 34) for v in sizes]
+        bubble_sizes = [np.clip((v - vmin) / (vmax - vmin) * 12 + 5, 5, 17) for v in sizes]
 
         fig = go.Figure()
         fig.add_scattergeo(
@@ -383,15 +357,14 @@ with left_col:
             marker=dict(
                 size=bubble_sizes,
                 color=colors_v,
-                colorscale=[[0, "#1E3A5F"], [0.4, "#2563EB"], [0.7, "#3B82F6"], [1, "#93C5FD"]],
+                colorscale=[[0, "#BFDBFE"], [0.5, "#3B82F6"], [1, "#1D4ED8"]],
                 colorbar=dict(
-                    title=dict(text="Lakh PD", font=dict(color="#4A5568", size=10)),
-                    tickfont=dict(color="#4A5568", size=9),
-                    thickness=10,
-                    len=0.5,
+                    title=dict(text="Lakh PD", font=dict(color="#64748B", size=10)),
+                    tickfont=dict(color="#64748B", size=9),
+                    thickness=10, len=0.5,
                 ),
                 opacity=0.85,
-                line=dict(width=0.5, color="rgba(147,197,253,0.3)"),
+                line=dict(width=1, color="#FFFFFF"),
             ),
             text=state_agg["state"],
             customdata=np.stack([
@@ -407,20 +380,20 @@ with left_col:
         )
         fig.update_geos(
             scope="asia",
-            showland=True,    landcolor="rgba(15,25,50,0.95)",
-            showocean=True,   oceancolor="rgba(7,13,26,1)",
-            showcountries=True, countrycolor="rgba(59,111,232,0.15)",
-            showsubunits=True,  subunitcolor="rgba(59,111,232,0.08)",
+            showland=True,    landcolor="#F1F5F9",
+            showocean=True,   oceancolor="#EFF6FF",
+            showcountries=True, countrycolor="#CBD5E1",
+            showsubunits=True,  subunitcolor="#E2E8F0",
             center=dict(lat=22, lon=80),
             projection_scale=5,
             bgcolor="rgba(0,0,0,0)",
         )
         fig.update_layout(
             height=430,
-            paper_bgcolor="rgba(7,13,26,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
             margin=dict(l=0, r=0, t=0, b=0),
-            font=dict(color="#E8F0FE", family="DM Sans"),
+            font=dict(color="#1E293B", family="DM Sans"),
             geo=dict(bgcolor="rgba(0,0,0,0)"),
             showlegend=False,
         )
@@ -429,15 +402,11 @@ with left_col:
     else:
         st.info("Run `python main.py --stage 3` to load prediction data.")
 
-# ───── RIGHT: AI brief + Insight cards ────────────────────────────────────────
+# ── RIGHT: Intelligence brief + signals ───────────────────────────────────────
 with right_col:
+    st.markdown('<div class="sec-label">Intelligence Brief</div>', unsafe_allow_html=True)
 
-    # ── AI-generated summary ────────────────────────────────────────────────
-    st.markdown('<div class="section-label">Intelligence Brief</div>', unsafe_allow_html=True)
-
-    # Build a real summary from live data
     n_declining, n_underfunded, top_state = 0, 0, "—"
-
     if not pred_df.empty and not opt_df.empty:
         latest_yr = pred_df["financial_year"].max()
         lat = pred_df[pred_df["financial_year"] == latest_yr]
@@ -449,81 +418,68 @@ with right_col:
             )
             mg["chg"] = mg["predicted_persondays"] - mg["prev"]
             n_declining = int((mg["chg"] < 0).sum())
-
         if "budget_allocated_lakhs" in opt_df.columns:
             th = opt_df["budget_allocated_lakhs"].quantile(0.33)
             n_underfunded = int((opt_df["budget_allocated_lakhs"] < th).sum())
-
         if "persondays_gain" in opt_df.columns:
             top_state = opt_df.groupby("state")["persondays_gain"].sum().idxmax()
 
     gain_display = f"{nat_gain:+,.1f}L" if nat_gain else "—"
-    brief_html = f"""
-<div class="ai-brief">
-    <div class="ai-brief-tag">◈ Generated from pipeline · FY {pred_df['financial_year'].max() if not pred_df.empty else '—'}</div>
-    <div class="ai-brief-text">
-        Budget-neutral reallocation of the MNREGA fiscal envelope yields a projected
-        <strong>{gain_display} lakh person-days</strong> of additional employment —
-        a <strong>{gain_pct_val:+.2f}%</strong> uplift at zero additional outlay.
-        <strong>{n_declining} districts</strong> are flagged for declining employment trajectories,
-        warranting priority administrative review.
-        High-return reallocation is concentrated in <strong>{top_state}</strong>.
-        <strong>{n_underfunded} districts</strong> in the bottom budget tercile
-        demonstrate above-average delivery efficiency, suggesting structural underfunding
-        that constrains welfare generation.
-    </div>
-</div>"""
-    st.markdown(brief_html, unsafe_allow_html=True)
+    latest_yr_label = pred_df['financial_year'].max() if not pred_df.empty else "—"
 
-    # ── Insight cards ───────────────────────────────────────────────────────
-    st.markdown('<div class="section-label">Live Signals</div>', unsafe_allow_html=True)
+    brief_text = (
+        f"Budget-neutral reallocation of the MNREGA fiscal envelope yields a projected "
+        f"<strong>{gain_display} lakh person-days</strong> of additional employment — "
+        f"a <strong>{gain_pct_val:+.2f}%</strong> uplift at zero additional outlay. "
+        f"<strong>{n_declining} districts</strong> are flagged for declining employment trajectories, "
+        f"warranting priority administrative review. "
+        f"High-return reallocation is concentrated in <strong>{top_state}</strong>. "
+        f"<strong>{n_underfunded} districts</strong> in the bottom budget tercile demonstrate "
+        f"above-average delivery efficiency, suggesting structural underfunding."
+    )
+    st.markdown(f"""
+<div class="brief-box">
+    <div class="brief-label">◈ Auto-generated · Pipeline FY {latest_yr_label}</div>
+    <div class="brief-text">{brief_text}</div>
+</div>""", unsafe_allow_html=True)
 
-    cards_html = f"""
-<div class="card-grid">
-    <div class="icard icard-red">
-        <div class="icard-num">{n_declining}</div>
-        <div class="icard-body">
-            <div class="icard-title">High-Risk Districts</div>
-            <div class="icard-sub">Predicted employment decline · next cycle</div>
-        </div>
-    </div>
-    <div class="icard icard-yellow">
-        <div class="icard-num">{n_underfunded}</div>
-        <div class="icard-body">
-            <div class="icard-title">Underfunded · High Efficiency</div>
-            <div class="icard-sub">Bottom-tercile budget · above-avg delivery</div>
-        </div>
-    </div>
-    <div class="icard icard-green">
-        <div class="icard-num">{gain_display}</div>
-        <div class="icard-body">
-            <div class="icard-title">LP Reallocation Gain</div>
-            <div class="icard-sub">Budget-neutral · {gain_pct_val:+.2f}% national uplift</div>
-        </div>
-    </div>
-    <div class="icard icard-blue">
-        <div class="icard-num">{int(n_dist)}</div>
-        <div class="icard-body">
-            <div class="icard-title">Districts in Model</div>
-            <div class="icard-sub">XGBoost · {year_range}</div>
-        </div>
-    </div>
-</div>"""
-    st.markdown(cards_html, unsafe_allow_html=True)
+    st.markdown('<div class="sec-label">Live Signals</div>', unsafe_allow_html=True)
 
-# ── Divider + Nav hint ─────────────────────────────────────────────────────────
-st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown(f"""
+<div class="icard red">
+    <div class="icard-num">{n_declining}</div>
+    <div>
+        <div class="icard-title">High-Risk Districts</div>
+        <div class="icard-sub">Predicted employment decline · next cycle</div>
+    </div>
+</div>
+<div class="icard amber">
+    <div class="icard-num">{n_underfunded}</div>
+    <div>
+        <div class="icard-title">Underfunded · High Efficiency</div>
+        <div class="icard-sub">Bottom-tercile budget · above-average delivery</div>
+    </div>
+</div>
+<div class="icard green">
+    <div class="icard-num">{gain_display}</div>
+    <div>
+        <div class="icard-title">LP Reallocation Gain</div>
+        <div class="icard-sub">Budget-neutral · {gain_pct_val:+.2f}% national uplift</div>
+    </div>
+</div>
+<div class="icard blue">
+    <div class="icard-num">{int(n_dist)}</div>
+    <div>
+        <div class="icard-title">Districts in Model</div>
+        <div class="icard-sub">XGBoost · {year_range} · R²≈0.9963</div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+# ── Footer nav ─────────────────────────────────────────────────────────────────
 st.markdown("""
-<div style="border-top: 1px solid rgba(255,255,255,0.05); padding-top: 1rem;
-            display: flex; gap: 2rem; align-items: center;">
-    <span style="font-family:'Syne Mono',monospace; font-size:0.62rem;
-                 letter-spacing:2px; color:#2D3748; text-transform:uppercase;">
-        Navigate →
-    </span>
-    <span style="font-size:0.75rem; color:#3D4F6E;">
-        01 Overview &nbsp;·&nbsp; 02 District Explorer &nbsp;·&nbsp;
-        03 Predictions &nbsp;·&nbsp; 04 Optimizer &nbsp;·&nbsp;
-        05 Spatial Map &nbsp;·&nbsp; 06 Strategic Insights
-    </span>
+<div class="bot-nav">
+    <strong>Navigate →</strong>
+    01 Overview · 02 District Explorer · 03 Predictions · 04 Optimizer · 05 Spatial Map · 06 Strategic Insights
 </div>
 """, unsafe_allow_html=True)

@@ -15,6 +15,7 @@ in src/model.py, the button triggers it; otherwise shows a message.
 
 import streamlit as st
 import pandas as pd
+import numpy as np
 import requests
 import plotly.express as px
 import plotly.graph_objects as go
@@ -185,26 +186,78 @@ if "budget_change" in dv.columns and "budget_allocated_lakhs" in dv.columns:
     )
     st.plotly_chart(fig1, use_container_width=True)
 
-# ── B) Scatter ───────────────────────────────────────────────────────────────────
+# ── B) Scatter — Rich District Tooltip ──────────────────────────────────────────
 st.markdown("**B — Efficiency vs Budget Change**")
 
 if "persondays_per_lakh" in dv.columns and "budget_change_pct" in dv.columns:
-    ccol = "persondays_gain" if "persondays_gain" in dv.columns else "budget_change_pct"
-    scol = dv["budget_allocated_lakhs"].clip(lower=1) if "budget_allocated_lakhs" in dv.columns else None
+    # Compute risk level based on persondays_gain_pct
+    def risk_level(row):
+        gain_pct = row.get("persondays_gain_pct", 0)
+        if gain_pct < -5:
+            return "High"
+        elif gain_pct < 5:
+            return "Medium"
+        else:
+            return "Low"
+
+    scatter_df = dv.copy()
+    scatter_df["risk_level"] = scatter_df.apply(risk_level, axis=1)
+
+    # Pull in actual persondays from predictions if available (sq_persondays = actual baseline)
+    # sq_persondays is the predicted baseline; opt_persondays is the projected optimised value
+    has_sq  = "sq_persondays" in scatter_df.columns
+    has_opt = "opt_persondays" in scatter_df.columns
+    has_gain_pct = "persondays_gain_pct" in scatter_df.columns
+
+    # Build customdata as columns added directly to scatter_df
+    scatter_df["_cd_district"]    = scatter_df["district"].fillna("—")
+    scatter_df["_cd_sq_pd"]       = scatter_df["sq_persondays"].round(1) if has_sq else "—"
+    scatter_df["_cd_opt_pd"]      = scatter_df["opt_persondays"].round(1) if has_opt else "—"
+    scatter_df["_cd_eff"]         = (scatter_df["persondays_per_lakh"] * 100).round(1)
+    scatter_df["_cd_gain_pct"]    = scatter_df["persondays_gain_pct"].round(1) if has_gain_pct else 0.0
+    scatter_df["_cd_risk"]        = scatter_df["risk_level"]
+    scatter_df["_cd_state"]       = scatter_df["state"].fillna("—")
+    scatter_df["_cd_bud_chg"]     = scatter_df["budget_change_pct"].round(1)
+
+    color_col = "persondays_gain" if "persondays_gain" in scatter_df.columns else "budget_change_pct"
+    size_col  = scatter_df["budget_allocated_lakhs"].clip(lower=1) if "budget_allocated_lakhs" in scatter_df.columns else None
 
     fig2 = px.scatter(
-        dv, x="persondays_per_lakh", y="budget_change_pct",
-        color=ccol, color_continuous_scale="RdYlGn",
-        size=scol, size_max=25,
-        hover_data=["state","district","budget_allocated_lakhs",
-                    "persondays_per_lakh","budget_change_pct"],
-        labels={"persondays_per_lakh": "Efficiency (PD/₹L)",
-                "budget_change_pct": "Budget Change (%)",
-                "persondays_gain": "PD Gain (L)"},
+        scatter_df,
+        x="persondays_per_lakh",
+        y="budget_change_pct",
+        color=color_col,
+        color_continuous_scale="RdYlGn",
+        size=size_col,
+        size_max=20,
+        custom_data=["_cd_district", "_cd_sq_pd", "_cd_opt_pd", "_cd_eff",
+                     "_cd_gain_pct", "_cd_risk", "_cd_state", "_cd_bud_chg"],
+        labels={
+            "persondays_per_lakh": "Efficiency (PD/₹L)",
+            "budget_change_pct": "Budget Change (%)",
+            "persondays_gain": "PD Gain (L)",
+        },
     )
+
+    # Rich hover tooltip matching the requested format
+    fig2.update_traces(
+        hovertemplate=(
+            "<b>District: %{customdata[0]}</b><br>"
+            "<span style='color:#94A3B8'>%{customdata[6]}</span><br>"
+            "─────────────────────<br>"
+            "Actual (baseline): %{customdata[1]}L<br>"
+            "Predicted (optimised): %{customdata[2]}L<br>"
+            "Efficiency: %{customdata[3]:.0f} PD / ₹1L<br>"
+            "Budget Change: %{customdata[7]}%<br>"
+            "Optimisation Gain: %{customdata[4]:+.1f}%<br>"
+            "Risk Level: <b>%{customdata[5]}</b>"
+            "<extra></extra>"
+        )
+    )
+
     fig2.add_hline(y=0, line_color="rgba(255,255,255,0.2)", line_dash="dash")
     fig2.add_vline(
-        x=dv["persondays_per_lakh"].median(),
+        x=scatter_df["persondays_per_lakh"].median(),
         line_color="rgba(255,255,255,0.1)", line_dash="dot",
         annotation_text="Median efficiency",
         annotation_font_color="#94A3B8",
