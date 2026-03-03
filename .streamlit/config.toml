@@ -1,0 +1,16 @@
+[server]
+headless = true
+fileWatcherType = "auto"
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "light"
+backgroundColor = "#FAF9F7"
+secondaryBackgroundColor = "#F5F5F4"
+textColor = "#1C1917"
+font = "serif"
+
+[client]
+showSidebarNavigation = true

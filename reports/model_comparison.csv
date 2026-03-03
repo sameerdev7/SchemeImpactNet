@@ -1,0 +1,4 @@
+model,rmse,mae,r2,selected
+XGBoost,2.3301,1.3795,0.9963,★
+GradientBoostingRegressor,1.9383,1.1863,0.9975,
+RandomForestRegressor,2.2926,1.0879,0.9965,
