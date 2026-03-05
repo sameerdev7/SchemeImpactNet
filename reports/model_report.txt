@@ -1,30 +1,57 @@
-SchemeImpactNet — Model Report
-==================================================
-Model     : XGBRegressor
-Test years: [2024]
-RMSE      : 2.3301
-MAE       : 1.3795
-R2        : 0.9963
+SchemeImpactNet — V4 Model Selection Report
+============================================================
 
-W&B Project : schemeimpactnet
-W&B Enabled : True
+Best Model    : GradientBoosting
+Selection     : max mean R² excl. 2022 (walk-forward CV)
+Features      : 17
+Evaluation    : Walk-forward CV (2018–2024)
 
-Features used:
-  - financial_year
-  - avg_wage_rate
-  - lag_person_days
-  - lag_expenditure
-  - expenditure_per_personday
-  - yoy_growth
-  - district_avg_persondays
-  - demand_fulfillment_rate
-  - district_encoded
-  - state_encoded
-  - rainfall_mm
-  - crop_season_index
-  - rural_population_lakhs
-  - poverty_rate_pct
-  - drought_flag
-  - high_poverty_flag
-  - scheme_overlap_score
-  - budget_utilization_rate
+Algorithm Comparison:
+  Model                       R²     ex22 R²       MAE      RMSE
+  ------------------------------------------------------------
+  GradientBoosting        0.8510      0.9078     8.554    16.334 ← BEST
+  RandomForest            0.8417      0.9063     8.739    16.679
+  Ridge                   0.8018      0.8824     9.975    18.545
+  ElasticNet              0.7982      0.8811     9.890    18.678
+  XGBoost                 0.8533      0.9034     8.457    16.409
+
+Best Model (GradientBoosting) Walk-Forward CV:
+  Mean R²     : 0.8510
+  excl.2022 R²: 0.9078
+  Mean MAE    : 8.554 lakh
+  Mean RMSE   : 16.334 lakh
+  R² gain     : +0.0737 vs naive lag-1
+
+Previous (leaked) R²: 0.9963
+Leakage source: works_completed (r=1.0 with target)
+
+2022 anomaly: West Bengal -93 to -98% reporting drop. Excl. R²=0.9078
+
+Feature Importances:
+  lag1_pd                             0.5270
+  lag1_adj                            0.2512
+  state_lag1_zscore                   0.0837
+  roll2_mean                          0.0612
+  blended_capacity                    0.0199
+  roll3_mean                          0.0188
+  is_covid                            0.0067
+  lag3_pd                             0.0065
+  state_lag1_norm                     0.0056
+  lag2_pd                             0.0054
+  relative_to_state                   0.0034
+  state_enc                           0.0033
+  roll3_std                           0.0030
+  avg_wage_rate                       0.0015
+  lag1_vs_capacity                    0.0014
+  wage_yoy                            0.0013
+  lag1_is_covid                       0.0000
+
+Year-by-year CV (GradientBoosting):
+ year   n     r2    mae   rmse         mape  naive_r2  naive_mae  r2_gain  mae_gain
+ 2018 689 0.9160  6.639 13.168 1.996413e+09    0.9124      7.556   0.0036     0.916
+ 2019 701 0.9262  6.380 11.111 1.571437e+10    0.8651      7.484   0.0611     1.104
+ 2020 695 0.8354 12.681 23.825 1.346619e+09    0.7526     18.279   0.0828     5.598
+ 2021 698 0.9261  7.150 14.966 6.480334e+08    0.9384      7.988  -0.0122     0.839
+ 2022 713 0.5101 13.954 28.022 2.442193e+08    0.1804     14.288   0.3297     0.334
+ 2023 709 0.9089  7.403 13.336 3.815669e+10    0.9227      6.984  -0.0139    -0.419
+ 2024 727 0.9345  5.673  9.911 2.038457e+10    0.8697      7.278   0.0648     1.605

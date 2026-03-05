@@ -3,6 +3,9 @@ crud.py
 -------
 Database query functions. All queries return plain dicts/lists
 so FastAPI routers stay thin.
+
+V3 update: expenditure_lakhs, expenditure_per_personday, demand_fulfillment_rate
+removed — these were synthetic columns dropped in the leak-free pipeline.
 """
 
 import pandas as pd
@@ -28,9 +31,8 @@ def get_districts(db: Session, state: str) -> List[str]:
 
 def get_district_history(db: Session, state: str, district: str) -> List[dict]:
     rows = db.execute(text("""
-        SELECT state, district, financial_year, person_days_lakhs,
-               expenditure_lakhs, avg_wage_rate,
-               expenditure_per_personday, demand_fulfillment_rate
+        SELECT state, district, financial_year,
+               person_days_lakhs, avg_wage_rate
         FROM district_data
         WHERE state=:s AND district=:d
         ORDER BY financial_year
@@ -39,16 +41,15 @@ def get_district_history(db: Session, state: str, district: str) -> List[dict]:
 
 
 def get_top_districts(db: Session, state: Optional[str], metric: str, n: int) -> List[dict]:
-    valid = {"person_days_lakhs", "expenditure_lakhs", "expenditure_per_personday"}
+    # Only allow metrics that actually exist in V3 data
+    valid = {"person_days_lakhs"}
     if metric not in valid:
         metric = "person_days_lakhs"
     where = "WHERE state=:s" if state else ""
     params = {"s": state} if state else {}
     rows = db.execute(text(f"""
         SELECT state, district,
-               AVG(person_days_lakhs) as avg_persondays,
-               AVG(expenditure_lakhs) as avg_expenditure,
-               AVG(expenditure_per_personday) as avg_efficiency
+               AVG(person_days_lakhs) as avg_persondays
         FROM district_data
         {where}
         GROUP BY state, district
@@ -63,9 +64,8 @@ def get_yearly_trend(db: Session, state: Optional[str]) -> List[dict]:
     params = {"s": state} if state else {}
     rows = db.execute(text(f"""
         SELECT financial_year,
-               SUM(person_days_lakhs)  as total_persondays,
-               SUM(expenditure_lakhs)  as total_expenditure,
-               AVG(avg_wage_rate)      as avg_wage
+               SUM(person_days_lakhs) as total_persondays,
+               AVG(avg_wage_rate)     as avg_wage
         FROM district_data
         {where}
         GROUP BY financial_year
@@ -77,14 +77,14 @@ def get_yearly_trend(db: Session, state: Optional[str]) -> List[dict]:
 def get_stats(db: Session) -> dict:
     r = db.execute(text("""
         SELECT
-            COUNT(DISTINCT district)          as total_districts,
-            COUNT(DISTINCT state)             as total_states,
+            COUNT(DISTINCT district) as total_districts,
+            COUNT(DISTINCT state)    as total_states,
             MIN(financial_year)||' – '||MAX(financial_year) as year_range,
-            SUM(person_days_lakhs)            as total_persondays_lakhs,
-            SUM(expenditure_lakhs)            as total_expenditure_lakhs
+            SUM(person_days_lakhs)   as total_persondays_lakhs
         FROM district_data
     """)).fetchone()
     base = dict(r._mapping)
+    base["total_expenditure_lakhs"] = 0.0   # removed in V3 (synthetic column)
 
     # COVID spike
     pre  = db.execute(text("SELECT AVG(person_days_lakhs) FROM district_data WHERE financial_year=2019")).scalar()

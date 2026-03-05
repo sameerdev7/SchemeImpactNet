@@ -58,7 +58,8 @@ def _summary_stats(df: pd.DataFrame) -> None:
     print(f"[eda] Districts       : {df['district'].nunique()}")
     print(f"[eda] Years           : {df['financial_year'].min()} – {df['financial_year'].max()}")
     print(f"[eda] Total persondays: {df['person_days_lakhs'].sum():,.1f} lakh")
-    print(f"[eda] Total expenditure: Rs. {df['expenditure_lakhs'].sum():,.1f} lakh")
+    if "expenditure_lakhs" in df.columns:
+        print(f"[eda] Total expenditure: Rs. {df['expenditure_lakhs'].sum():,.1f} lakh")
 
     print(f"\n[eda] Person days by year (state-aggregated mean):")
     by_year = df.groupby("financial_year")["person_days_lakhs"].mean()
@@ -74,7 +75,6 @@ def _summary_stats(df: pd.DataFrame) -> None:
 def _plot_trend(df: pd.DataFrame, scope: str) -> None:
     yearly = df.groupby("financial_year").agg(
         total_persondays=("person_days_lakhs", "sum"),
-        total_expenditure=("expenditure_lakhs", "sum")
     ).reset_index()
 
     fig, ax1 = plt.subplots(figsize=(11, 5))
@@ -83,14 +83,7 @@ def _plot_trend(df: pd.DataFrame, scope: str) -> None:
     ax1.set_ylabel("Total Person Days (lakh)", color="#2196F3")
     ax1.tick_params(axis="y", labelcolor="#2196F3")
     ax1.set_xlabel("Financial Year")
-
-    ax2 = ax1.twinx()
-    ax2.plot(yearly["financial_year"], yearly["total_expenditure"],
-             color="#F44336", marker="o", linewidth=2.5, label="Expenditure (Rs. lakh)")
-    ax2.set_ylabel("Total Expenditure (Rs. lakh)", color="#F44336")
-    ax2.tick_params(axis="y", labelcolor="#F44336")
-
-    plt.title(f"MNREGA Trend — {scope} (Person Days & Expenditure)")
+    plt.title(f"MNREGA Trend — {scope} (Person Days)")
     fig.tight_layout()
     _save("01_statewide_trend.png")
 
@@ -129,14 +122,15 @@ def _plot_top_bottom_districts(df: pd.DataFrame, scope: str) -> None:
 # ── 4. Efficiency ranking ─────────────────────────────────────────────────────
 
 def _plot_efficiency_ranking(df: pd.DataFrame, scope: str) -> None:
+    if "expenditure_per_personday" not in df.columns:
+        print("[eda] Skipping efficiency ranking — expenditure_per_personday not in V3 features")
+        return
     eff = (
         df.groupby("district")["expenditure_per_personday"]
         .mean().sort_values().dropna()
     )
-    # Show top/bottom 15 only if too many districts
     if len(eff) > 30:
         eff = pd.concat([eff.head(15), eff.tail(15)])
-
     fig, ax = plt.subplots(figsize=(10, max(6, len(eff) * 0.3)))
     colors = ["#43A047" if v <= eff.median() else "#EF5350" for v in eff.values]
     ax.barh(eff.index, eff.values, color=colors)
@@ -147,7 +141,6 @@ def _plot_efficiency_ranking(df: pd.DataFrame, scope: str) -> None:
     ax.legend()
     plt.tight_layout()
     _save("03_efficiency_ranking.png")
-
     print(f"\n[eda] Most efficient : {eff.idxmin()} ({eff.min():.1f})")
     print(f"[eda] Least efficient: {eff.idxmax()} ({eff.max():.1f})")
 

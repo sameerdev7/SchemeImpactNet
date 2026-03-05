@@ -1,393 +1,590 @@
 """
 model.py
 --------
-XGBoost model to predict next year's person_days_lakhs per district.
+V4 Multi-Algorithm Model Selection for MNREGA district-level forecasting.
 
-Stage 1: Maharashtra features only
-Stage 2+: Automatically uses extra features when present
+Algorithms compared via walk-forward CV:
+    - GradientBoostingRegressor  (current champion)
+    - RandomForestRegressor
+    - XGBoost
+    - LightGBM
+    - Ridge (linear baseline)
+    - ElasticNet (regularised linear baseline)
 
-Temporal split: train on years up to 2023, test on 2024.
-This strictly mimics real forecasting — never train on future data.
+Selection criterion: mean R² across walk-forward CV years (excl. 2022 anomaly).
+Best model is saved to models/mnrega_best_model.pkl.
 
-W&B Integration (Weights & Biases):
-    Tracks every run with:
-    - Hyperparameters
-    - RMSE / MAE / R² per run
-    - Feature importance table
-    - Actual vs Predicted scatter artifact
-    - Model comparison table (XGBoost vs GBR vs RF)
-    - Literature note: mirrors Rao et al. (2025) Table I systematic comparison
+W&B logging:
+    - Each algorithm gets its own W&B run (group="mnrega_model_selection")
+    - Per-year CV metrics logged as time-series
+    - Feature importance logged as bar chart
+    - Model comparison summary table logged
+    - Best model flagged with tag "champion"
 
-    To enable: pip install wandb && wandb login
-    To disable: set WANDB_ENABLED = False
-
-Literature notes:
-    - Rao et al. (2025): Table I compares 5 models. We replicate this with
-      run_model_comparison() which logs all three to W&B side-by-side.
-    - Kannan et al. (2022): Feature importance mirrors their variable
-      significance analysis for household financial vigilance prediction.
+Usage:
+    export WANDB_API_KEY=your_key   # or wandb login
+    python main.py --stage 3
 """
 
 import os
-import pandas as pd
+import pickle
+import warnings
 import numpy as np
+import pandas as pd
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
+from sklearn.linear_model import Ridge, ElasticNet
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
 
-# ── W&B Configuration ─────────────────────────────────────────────────────────
-WANDB_ENABLED = True    # Set False to run without W&B
-WANDB_PROJECT = "schemeimpactnet"
-WANDB_ENTITY  = None    # Set to your W&B username/team, or None for default
+warnings.filterwarnings("ignore")
 
-MODEL_BACKEND = "xgboost"   # "sklearn" | "xgboost"
+# Optional imports — graceful fallback if not installed
+try:
+    from xgboost import XGBRegressor
+    HAS_XGB = True
+except ImportError:
+    HAS_XGB = False
+    print("[model] xgboost not installed — skipping")
 
+try:
+    from lightgbm import LGBMRegressor
+    HAS_LGB = True
+except ImportError:
+    HAS_LGB = False
+    print("[model] lightgbm not installed — skipping")
+
+try:
+    import wandb
+    HAS_WANDB = True
+except ImportError:
+    HAS_WANDB = False
+    print("[model] wandb not installed — metrics will be logged locally only")
+
+from src.features import FEATURE_COLS
+
+TARGET      = "person_days_lakhs"
 FIGURES_DIR = os.path.join("reports", "figures")
 OUTPUT_DIR  = os.path.join("data", "processed")
+MODELS_DIR  = "models"
+MODEL_PATH  = os.path.join(MODELS_DIR, "mnrega_best_model.pkl")
+WANDB_PROJECT = "SchemeImpactNet"
+WANDB_GROUP   = "mnrega_model_selection"
+
 os.makedirs(FIGURES_DIR, exist_ok=True)
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(OUTPUT_DIR,  exist_ok=True)
+os.makedirs(MODELS_DIR,  exist_ok=True)
 
-TARGET = "person_days_lakhs"
+# Walk-forward CV test years
+WF_TEST_YEARS = [2018, 2019, 2020, 2021, 2022, 2023, 2024]
 
-ALL_FEATURE_COLS = [
-    # Core (Stage 1)
-    "financial_year", "avg_wage_rate",
-    "lag_person_days", "lag_expenditure",
-    "expenditure_per_personday", "yoy_growth",
-    "district_avg_persondays", "demand_fulfillment_rate",
-    "district_encoded", "state_encoded",
-    # Stage 2
-    "rainfall_mm", "crop_season_index",
-    "rural_population_lakhs", "poverty_rate_pct",
-    "drought_flag", "high_poverty_flag",
-    # Stage 3
-    "scheme_overlap_score", "budget_utilization_rate",
-]
-
-TRAIN_YEARS = [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023]
-TEST_YEARS  = [2024]
-
-
-# ── W&B init helper ───────────────────────────────────────────────────────────
-def _init_wandb(run_name: str, config: dict):
-    """Initialize W&B run. Returns (run, True) or (None, False)."""
-    if not WANDB_ENABLED:
-        return None, False
-    try:
-        import wandb
-        run = wandb.init(
-            project=WANDB_PROJECT,
-            entity=WANDB_ENTITY,
-            name=run_name,
-            config=config,
-            reinit=True,
+# ── Algorithm registry ────────────────────────────────────────────────────────
+def _build_candidates() -> dict:
+    """
+    Returns dict of {name: estimator}.
+    Each estimator is either a plain sklearn estimator or a Pipeline
+    (for linear models that need scaling).
+    """
+    candidates = {
+        "GradientBoosting": GradientBoostingRegressor(
+            n_estimators=200, max_depth=4, learning_rate=0.03,
+            subsample=0.7, min_samples_leaf=10, random_state=42,
+        ),
+        "RandomForest": RandomForestRegressor(
+            n_estimators=300, max_depth=8, min_samples_leaf=10,
+            n_jobs=-1, random_state=42,
+        ),
+        "Ridge": Pipeline([
+            ("scaler", StandardScaler()),
+            ("model",  Ridge(alpha=10.0)),
+        ]),
+        "ElasticNet": Pipeline([
+            ("scaler", StandardScaler()),
+            ("model",  ElasticNet(alpha=0.1, l1_ratio=0.5, max_iter=2000)),
+        ]),
+    }
+    if HAS_XGB:
+        candidates["XGBoost"] = XGBRegressor(
+            n_estimators=200, max_depth=4, learning_rate=0.03,
+            subsample=0.7, colsample_bytree=0.8,
+            reg_alpha=0.1, reg_lambda=1.0,
+            random_state=42, verbosity=0,
         )
-        return run, True
-    except Exception as e:
-        print(f"[model] W&B unavailable: {e}. Continuing without tracking.")
-        return None, False
+    if HAS_LGB:
+        candidates["LightGBM"] = LGBMRegressor(
+            n_estimators=200, max_depth=4, learning_rate=0.03,
+            subsample=0.7, colsample_bytree=0.8,
+            reg_alpha=0.1, reg_lambda=1.0,
+            random_state=42, verbosity=-1,
+        )
+    return candidates
 
+
+# ── Main entry point ──────────────────────────────────────────────────────────
 
 def run_model(df: pd.DataFrame) -> pd.DataFrame:
-    print("\n[model] ── Starting Model Pipeline ──────────────────────────")
+    """
+    Full model selection pipeline:
+      1. Walk-forward CV for each algorithm candidate
+      2. Select best by mean R² (excl. 2022)
+      3. Train winner on all data
+      4. Save model + metadata pkl
+      5. Generate figures + W&B logs
+      6. Return predictions DataFrame
+    """
+    print("\n[model] ── V4 Multi-Algorithm Model Selection ───────────────")
 
-    df = _encode_categoricals(df)
-    X, y = _prepare_xy(df)
-    X_train, X_test, y_train, y_test, test_idx = _temporal_split(df, X, y)
+    features = _get_features(df)
+    print(f"[model] Features ({len(features)}): {features}")
+    print(f"[model] Algorithms: {list(_build_candidates().keys())}")
 
-    model = _build_model()
+    candidates = _build_candidates()
 
-    # W&B config
-    model_params = {
-        "model":          model.__class__.__name__,
-        "backend":        MODEL_BACKEND,
-        "n_estimators":   300,
-        "learning_rate":  0.05,
-        "max_depth":      4,
-        "subsample":      0.8,
-        "train_years":    str(TRAIN_YEARS),
-        "test_years":     str(TEST_YEARS),
-        "n_features":     len(X.columns),
-        "n_train":        len(X_train),
-        "n_test":         len(X_test),
-        "target":         TARGET,
-    }
-    wb_run, wb_on = _init_wandb(f"xgb-run-{TRAIN_YEARS[-1]}", model_params)
+    # ── Walk-forward CV for all candidates ────────────────────────────────
+    all_cv_results = {}
+    for name, estimator in candidates.items():
+        print(f"\n[model] ── {name} ──")
+        cv = _walk_forward_cv(df, features, estimator, name)
+        all_cv_results[name] = cv
 
-    model.fit(X_train, y_train)
-    print(f"[model] Trained {model.__class__.__name__} | features: {len(X.columns)}")
+    # ── Select best model ─────────────────────────────────────────────────
+    best_name, best_cv = _select_best(all_cv_results)
+    print(f"\n[model] ✓ Best model: {best_name}")
 
-    results_df = _evaluate(model, X_test, y_test, df, test_idx)
-    rmse = np.sqrt(mean_squared_error(results_df[TARGET], results_df["predicted"]))
-    mae  = mean_absolute_error(results_df[TARGET], results_df["predicted"])
-    r2   = r2_score(results_df[TARGET], results_df["predicted"])
+    # ── Print full comparison table ───────────────────────────────────────
+    _print_comparison_table(all_cv_results)
 
-    # ── W&B logging ──────────────────────────────────────────────────────────
-    if wb_on:
-        import wandb
+    # ── Train winner on all data ──────────────────────────────────────────
+    print(f"\n[model] Training {best_name} on all {len(df):,} district-years...")
+    best_estimator = candidates[best_name]
+    X_all = df[features].fillna(0)
+    y_all = df[TARGET]
+    best_estimator.fit(X_all, y_all)
 
-        # Core metrics
-        wandb.log({
-            "rmse": round(rmse, 4),
-            "mae":  round(mae,  4),
-            "r2":   round(r2,   4),
-        })
+    # ── Log to W&B ────────────────────────────────────────────────────────
+    if HAS_WANDB:
+        _wandb_log_all(all_cv_results, best_name, best_estimator, features, df)
 
-        # Feature importance table
-        feat_imp = pd.Series(
-            model.feature_importances_,
-            index=X.columns.tolist()
-        ).sort_values(ascending=False).reset_index()
-        feat_imp.columns = ["feature", "importance"]
-        wandb.log({"feature_importance": wandb.Table(dataframe=feat_imp)})
+    # ── Save best model ───────────────────────────────────────────────────
+    _save_model(best_name, best_estimator, features, best_cv, all_cv_results, df)
 
-        # Actual vs Predicted scatter as W&B artifact
-        pred_table = results_df[["state", "district", "financial_year",
-                                  TARGET, "predicted", "error"]].copy()
-        pred_table.columns = ["state", "district", "year",
-                               "actual", "predicted", "error"]
-        wandb.log({"predictions": wandb.Table(dataframe=pred_table)})
+    # ── Figures ───────────────────────────────────────────────────────────
+    _plot_model_comparison(all_cv_results, best_name)
+    _plot_cv_per_year(all_cv_results, best_name)
+    _plot_feature_importance(best_name, best_estimator, features)
 
-        # Scatter plot as image artifact
-        fig_path = os.path.join(FIGURES_DIR, "06_predictions_vs_actual.png")
-        _plot_predictions(results_df)   # saves the fig
-        wandb.log({"actual_vs_predicted": wandb.Image(fig_path)})
-
-        # Feature importance plot
-        fi_path = os.path.join(FIGURES_DIR, "07_feature_importance.png")
-        _plot_feature_importance(model, X.columns.tolist())
-        wandb.log({"feature_importance_plot": wandb.Image(fi_path)})
-
-        wb_run.finish()
-        print(f"[model] W&B run logged → https://wandb.ai/{WANDB_ENTITY or 'your-team'}/{WANDB_PROJECT}")
-    else:
-        _plot_predictions(results_df)
-        _plot_feature_importance(model, X.columns.tolist())
-
-    _save_model_report(model, results_df, X.columns.tolist())
-
-    predictions_df = _predict_all(model, df, X)
+    # ── Predictions + report ──────────────────────────────────────────────
+    predictions_df = _predict_all(best_estimator, df, features)
     _save_predictions(predictions_df)
+    _save_model_report(best_name, best_cv, all_cv_results, features, best_estimator)
 
-    print("[model] ── Model Pipeline Complete ──────────────────────────\n")
+    print("\n[model] ── V4 Pipeline Complete ─────────────────────────────\n")
     return predictions_df
 
 
-def run_model_comparison(
-    X_train, X_test, y_train, y_test, df, test_idx
+# ── Walk-forward CV ───────────────────────────────────────────────────────────
+
+def _walk_forward_cv(
+    df: pd.DataFrame,
+    features: list,
+    estimator,
+    name: str,
 ) -> pd.DataFrame:
-    """
-    Systematic model comparison — Rao et al. (2025) Table I methodology.
+    """Walk-forward CV: train on years < T, evaluate on T."""
+    print(f"  {'Year':<6} {'n':>5}  {'R²':>8}  {'MAE':>8}  {'RMSE':>8}  {'Naive R²':>10}  {'R² gain':>8}")
+    print(f"  {'-'*68}")
 
-    Compares XGBoost vs GradientBoostingRegressor vs RandomForestRegressor
-    side by side. Logs a comparison table to W&B so every run is tracked.
+    rows = []
+    for test_yr in WF_TEST_YEARS:
+        tr = df[df["financial_year"] < test_yr]
+        te = df[df["financial_year"] == test_yr]
+        if len(tr) < 200 or len(te) < 50:
+            continue
 
-    Returns: comparison DataFrame saved to reports/model_comparison.csv
-    """
-    print("\n[model] ── Model Comparison (Rao et al. 2025 methodology) ──")
+        import copy
+        m = copy.deepcopy(estimator)
+        m.fit(tr[features].fillna(0), tr[TARGET])
+        pred  = m.predict(te[features].fillna(0))
+        naive = te["lag1_pd"].fillna(te[TARGET].mean()).values
 
-    wb_run, wb_on = _init_wandb("model-comparison", {
-        "comparison_models": "XGBoost, GBR, RandomForest",
-        "train_years": str(TRAIN_YEARS),
-        "test_years":  str(TEST_YEARS),
+        r2      = r2_score(te[TARGET], pred)
+        mae     = mean_absolute_error(te[TARGET], pred)
+        rmse    = np.sqrt(mean_squared_error(te[TARGET], pred))
+        naive_r2  = r2_score(te[TARGET], naive)
+        naive_mae = mean_absolute_error(te[TARGET], naive)
+        mape    = np.mean(np.abs((te[TARGET].values - pred) / (te[TARGET].values + 1e-9))) * 100
+
+        print(f"  {test_yr:<6} {len(te):>5}  {r2:>8.4f}  {mae:>8.3f}  {rmse:>8.3f}  "
+              f"{naive_r2:>10.4f}  {r2-naive_r2:>+8.4f}")
+
+        rows.append({
+            "year": test_yr, "n": len(te),
+            "r2": round(r2, 4),
+            "mae": round(mae, 3),
+            "rmse": round(rmse, 3),
+            "mape": round(mape, 3),
+            "naive_r2": round(naive_r2, 4),
+            "naive_mae": round(naive_mae, 3),
+            "r2_gain": round(r2 - naive_r2, 4),
+            "mae_gain": round(naive_mae - mae, 3),
+        })
+
+    cv = pd.DataFrame(rows)
+    ex22 = cv[cv["year"] != 2022]
+    print(f"  → Mean R²={cv['r2'].mean():.4f}  excl.2022 R²={ex22['r2'].mean():.4f}  "
+          f"MAE={cv['mae'].mean():.3f}L")
+    return cv
+
+
+# ── Model selection ───────────────────────────────────────────────────────────
+
+def _select_best(all_cv: dict) -> tuple:
+    """Select best model by mean R² excluding 2022 anomaly year."""
+    scores = {}
+    for name, cv in all_cv.items():
+        ex22 = cv[cv["year"] != 2022]
+        scores[name] = ex22["r2"].mean()
+
+    best_name = max(scores, key=scores.get)
+    print(f"\n[model] Model selection (mean R² excl. 2022):")
+    for name, score in sorted(scores.items(), key=lambda x: -x[1]):
+        marker = " ← BEST" if name == best_name else ""
+        print(f"  {name:<20}: {score:.4f}{marker}")
+
+    return best_name, all_cv[best_name]
+
+
+def _print_comparison_table(all_cv: dict) -> None:
+    print(f"\n[model] Full comparison (all years):")
+    print(f"  {'Model':<20}  {'R²':>8}  {'excl22 R²':>10}  {'MAE':>8}  {'RMSE':>8}  {'R²gain':>8}")
+    print(f"  {'-'*72}")
+    for name, cv in all_cv.items():
+        ex22 = cv[cv["year"] != 2022]
+        print(f"  {name:<20}  {cv['r2'].mean():>8.4f}  {ex22['r2'].mean():>10.4f}  "
+              f"{cv['mae'].mean():>8.3f}  {cv['rmse'].mean():>8.3f}  "
+              f"{cv['r2_gain'].mean():>+8.4f}")
+
+
+# ── W&B logging ───────────────────────────────────────────────────────────────
+
+def _wandb_log_all(
+    all_cv: dict,
+    best_name: str,
+    best_estimator,
+    features: list,
+    df: pd.DataFrame,
+) -> None:
+    """Log all model results to W&B — one run per algorithm + one summary run."""
+
+    # ── Per-algorithm runs ────────────────────────────────────────────────
+    for name, cv in all_cv.items():
+        ex22 = cv[cv["year"] != 2022]
+        tags = ["champion"] if name == best_name else []
+
+        run = wandb.init(
+            project=WANDB_PROJECT,
+            group=WANDB_GROUP,
+            name=name,
+            tags=tags,
+            config={
+                "algorithm": name,
+                "n_features": len(features),
+                "features": features,
+                "wf_test_years": WF_TEST_YEARS,
+                "target": TARGET,
+                "is_best": name == best_name,
+            },
+            reinit=True,
+        )
+
+        # Per-year CV metrics as time series
+        for _, row in cv.iterrows():
+            run.log({
+                "year": int(row["year"]),
+                "r2": row["r2"],
+                "mae": row["mae"],
+                "rmse": row["rmse"],
+                "mape": row["mape"],
+                "naive_r2": row["naive_r2"],
+                "r2_gain": row["r2_gain"],
+                "mae_gain": row["mae_gain"],
+                "is_anomaly_year": int(row["year"]) == 2022,
+            })
+
+        # Summary metrics
+        run.summary.update({
+            "cv_mean_r2":     round(cv["r2"].mean(), 4),
+            "cv_ex22_r2":     round(ex22["r2"].mean(), 4),
+            "cv_mean_mae":    round(cv["mae"].mean(), 3),
+            "cv_mean_rmse":   round(cv["rmse"].mean(), 3),
+            "cv_mean_mape":   round(cv["mape"].mean(), 3),
+            "cv_r2_gain":     round(cv["r2_gain"].mean(), 4),
+            "n_districts":    df["district"].nunique(),
+            "n_states":       df["state"].nunique(),
+            "train_years":    len(df["financial_year"].unique()),
+        })
+
+        # Feature importance (tree-based only)
+        fi = _get_feature_importance(name, best_estimator if name == best_name else None, features)
+        if fi is not None and name == best_name:
+            fi_table = wandb.Table(
+                columns=["feature", "importance"],
+                data=[[f, v] for f, v in sorted(fi.items(), key=lambda x: -x[1])]
+            )
+            run.log({"feature_importance": wandb.plot.bar(
+                fi_table, "feature", "importance",
+                title=f"Feature Importance — {name}"
+            )})
+
+        # CV R² chart per year
+        cv_table = wandb.Table(dataframe=cv[["year","r2","naive_r2","mae","rmse","r2_gain"]])
+        run.log({
+            "cv_results_table": cv_table,
+            "cv_r2_chart": wandb.plot.line_series(
+                xs=cv["year"].tolist(),
+                ys=[cv["r2"].tolist(), cv["naive_r2"].tolist()],
+                keys=["Model R²", "Naive R²"],
+                title=f"Walk-Forward CV R² — {name}",
+                xname="Financial Year",
+            ),
+        })
+
+        run.finish()
+
+    # ── Summary comparison run ────────────────────────────────────────────
+    run = wandb.init(
+        project=WANDB_PROJECT,
+        group=WANDB_GROUP,
+        name="model_selection_summary",
+        tags=["summary"],
+        reinit=True,
+    )
+
+    summary_rows = []
+    for name, cv in all_cv.items():
+        ex22 = cv[cv["year"] != 2022]
+        summary_rows.append([
+            name,
+            round(cv["r2"].mean(), 4),
+            round(ex22["r2"].mean(), 4),
+            round(cv["mae"].mean(), 3),
+            round(cv["rmse"].mean(), 3),
+            round(cv["mape"].mean(), 3),
+            round(cv["r2_gain"].mean(), 4),
+            name == best_name,
+        ])
+
+    summary_table = wandb.Table(
+        columns=["model", "mean_r2", "ex22_r2", "mean_mae",
+                 "mean_rmse", "mean_mape", "r2_gain", "is_best"],
+        data=summary_rows,
+    )
+    run.log({
+        "model_comparison": summary_table,
+        "best_model": best_name,
+        "best_ex22_r2": round(all_cv[best_name][all_cv[best_name]["year"] != 2022]["r2"].mean(), 4),
     })
 
-    params = dict(n_estimators=300, learning_rate=0.05, max_depth=4,
-                  subsample=0.8, random_state=42)
+    # Comparison bar chart
+    run.log({
+        "r2_comparison": wandb.plot.bar(
+            wandb.Table(
+                columns=["model", "ex22_r2"],
+                data=[[r[0], r[2]] for r in summary_rows]
+            ),
+            "model", "ex22_r2",
+            title="Model Comparison — R² excl. 2022",
+        )
+    })
 
-    models = {}
-    try:
-        from xgboost import XGBRegressor
-        models["XGBoost"] = XGBRegressor(**params, colsample_bytree=0.8, verbosity=0)
-    except ImportError:
-        print("[model] XGBoost not installed — skipping from comparison")
-
-    models["GradientBoostingRegressor"] = GradientBoostingRegressor(**params)
-    models["RandomForestRegressor"]     = RandomForestRegressor(
-        n_estimators=300, max_depth=8, random_state=42, n_jobs=-1
-    )
-
-    results = []
-    for name, m in models.items():
-        m.fit(X_train, y_train)
-        preds = m.predict(X_test)
-        rmse = round(np.sqrt(mean_squared_error(y_test, preds)), 4)
-        mae  = round(mean_absolute_error(y_test, preds), 4)
-        r2   = round(r2_score(y_test, preds), 4)
-        best = "★" if name == "XGBoost" else ""   # highlight selected model
-        results.append({"model": name, "rmse": rmse, "mae": mae, "r2": r2, "selected": best})
-        print(f"[model]   {name:30s} RMSE={rmse:.4f}  MAE={mae:.4f}  R²={r2:.4f} {best}")
-
-    comp_df = pd.DataFrame(results)
-
-    # Save CSV
-    os.makedirs("reports", exist_ok=True)
-    out_path = os.path.join("reports", "model_comparison.csv")
-    comp_df.to_csv(out_path, index=False)
-    print(f"[model] Model comparison saved → {out_path}")
-
-    # W&B comparison table
-    if wb_on:
-        import wandb
-        wandb.log({"model_comparison": wandb.Table(dataframe=comp_df)})
-
-        # W&B bar chart artifact
-        fig, ax = plt.subplots(figsize=(8, 4))
-        x = np.arange(len(comp_df))
-        bars = ax.bar(x, comp_df["r2"], color=["#3B82F6","#94A3B8","#94A3B8"])
-        for bar, val in zip(bars, comp_df["r2"]):
-            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.005,
-                    f"{val:.4f}", ha="center", va="bottom", fontsize=10)
-        ax.set_xticks(x); ax.set_xticklabels(comp_df["model"], rotation=10)
-        ax.set_ylabel("R² Score"); ax.set_title("Model Comparison (Rao et al. 2025 — Table I)")
-        ax.set_ylim(0, 1.05)
-        plt.tight_layout()
-        comp_fig_path = os.path.join(FIGURES_DIR, "model_comparison_r2.png")
-        plt.savefig(comp_fig_path, bbox_inches="tight"); plt.close()
-        wandb.log({"model_comparison_chart": wandb.Image(comp_fig_path)})
-
-        wb_run.finish()
-
-    print(f"[model] ── Comparison done. XGBoost selected (highest R²: {comp_df.loc[comp_df['model']=='XGBoost','r2'].values[0] if 'XGBoost' in comp_df['model'].values else '—'}) ──")
-    return comp_df
+    run.finish()
+    print(f"[model] W&B logs complete → project: {WANDB_PROJECT} / group: {WANDB_GROUP}")
 
 
-# ── Preparation ───────────────────────────────────────────────────────────────
+# ── Figures ───────────────────────────────────────────────────────────────────
 
-def _encode_categoricals(df: pd.DataFrame) -> pd.DataFrame:
-    for col, enc_col in [("district", "district_encoded"), ("state", "state_encoded")]:
-        if col in df.columns:
-            le = LabelEncoder()
-            df[enc_col] = le.fit_transform(df[col].astype(str))
-    return df
+def _plot_model_comparison(all_cv: dict, best_name: str) -> None:
+    """Bar chart comparing all models on mean R² (all years and excl. 2022)."""
+    names = list(all_cv.keys())
+    mean_r2  = [all_cv[n]["r2"].mean() for n in names]
+    ex22_r2  = [all_cv[n][all_cv[n]["year"] != 2022]["r2"].mean() for n in names]
+    mean_mae = [all_cv[n]["mae"].mean() for n in names]
 
+    x = np.arange(len(names))
+    w = 0.35
 
-def _prepare_xy(df: pd.DataFrame) -> tuple:
-    available = [c for c in ALL_FEATURE_COLS if c in df.columns]
-    X = df[available].copy()
-    for col in X.columns:
-        if X[col].isna().any():
-            X[col] = X[col].fillna(X[col].median())
-    y = df[TARGET].copy()
-    return X, y
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
 
+    bars1 = ax1.bar(x - w/2, mean_r2,  w, label="All years",    alpha=0.8, color="#42A5F5")
+    bars2 = ax1.bar(x + w/2, ex22_r2, w, label="excl. 2022",   alpha=0.8, color="#26A69A")
+    ax1.set_xticks(x); ax1.set_xticklabels(names, rotation=20, ha="right")
+    ax1.set_ylabel("Mean R² (Walk-Forward CV)")
+    ax1.set_title("Model Comparison — R² Score")
+    ax1.set_ylim(0, 1)
+    ax1.legend()
+    # Annotate best
+    best_idx = names.index(best_name)
+    ax1.annotate("★ BEST", xy=(best_idx + w/2, ex22_r2[best_idx] + 0.01),
+                 ha="center", color="#E53935", fontsize=9, fontweight="bold")
 
-def _temporal_split(df, X, y):
-    test_mask  = df["financial_year"].isin(TEST_YEARS)
-    train_mask = df["financial_year"].isin(TRAIN_YEARS)
-    print(f"[model] Train years : {TRAIN_YEARS}")
-    print(f"[model] Test years  : {TEST_YEARS}")
-    print(f"[model] Train size  : {train_mask.sum()} | Test size: {test_mask.sum()}")
-    return (
-        X[train_mask], X[test_mask],
-        y[train_mask], y[test_mask],
-        df[test_mask].index
-    )
+    bars3 = ax2.bar(x, mean_mae, alpha=0.8,
+                    color=["#E53935" if n == best_name else "#78909C" for n in names])
+    ax2.set_xticks(x); ax2.set_xticklabels(names, rotation=20, ha="right")
+    ax2.set_ylabel("Mean MAE (lakh person-days)")
+    ax2.set_title("Model Comparison — MAE")
+    for bar in bars3:
+        ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.1,
+                 f"{bar.get_height():.2f}", ha="center", va="bottom", fontsize=8)
 
-
-def _build_model():
-    params = dict(n_estimators=300, learning_rate=0.05,
-                  max_depth=4, subsample=0.8, random_state=42)
-    if MODEL_BACKEND == "xgboost":
-        try:
-            from xgboost import XGBRegressor
-            return XGBRegressor(**params, colsample_bytree=0.8, verbosity=0)
-        except ImportError:
-            print("[model] XGBoost not found, falling back to sklearn GradientBoosting")
-    return GradientBoostingRegressor(**params)
-
-
-def _evaluate(model, X_test, y_test, df, test_idx) -> pd.DataFrame:
-    preds = model.predict(X_test)
-    rmse  = np.sqrt(mean_squared_error(y_test, preds))
-    mae   = mean_absolute_error(y_test, preds)
-    r2    = r2_score(y_test, preds)
-
-    print(f"\n[model] ── Evaluation (held-out {TEST_YEARS}) ──────────────")
-    print(f"[model]   RMSE : {rmse:.4f} lakh persondays")
-    print(f"[model]   MAE  : {mae:.4f} lakh persondays")
-    print(f"[model]   R2   : {r2:.4f}")
-    print(f"[model] ────────────────────────────────────────────────────")
-
-    results = df.loc[test_idx, ["state", "district", "financial_year", TARGET]].copy()
-    results["predicted"] = preds
-    results["error"]     = (results[TARGET] - results["predicted"]).round(3)
-    results["abs_error"] = results["error"].abs()
-
-    print("\n[model] Worst 5 predictions:")
-    print(results.nlargest(5, "abs_error")[
-        ["state", "district", "financial_year", TARGET, "predicted", "abs_error"]
-    ].to_string(index=False))
-
-    return results
-
-
-def _plot_predictions(results: pd.DataFrame) -> None:
-    fig, ax = plt.subplots(figsize=(9, 6))
-    for year, grp in results.groupby("financial_year"):
-        ax.scatter(grp[TARGET], grp["predicted"], label=str(year), alpha=0.65, s=50)
-    lims = [
-        min(results[TARGET].min(), results["predicted"].min()) * 0.95,
-        max(results[TARGET].max(), results["predicted"].max()) * 1.05,
-    ]
-    ax.plot(lims, lims, "k--", linewidth=1.5, label="Perfect prediction")
-    ax.set_xlabel("Actual Person Days (lakh)")
-    ax.set_ylabel("Predicted Person Days (lakh)")
-    ax.set_title("Actual vs Predicted — Person Days per District")
-    ax.legend()
+    plt.suptitle("SchemeImpactNet V4 — Algorithm Selection Results", fontsize=12, fontweight="bold")
     plt.tight_layout()
-    path = os.path.join(FIGURES_DIR, "06_predictions_vs_actual.png")
-    plt.savefig(path, bbox_inches="tight")
+    path = os.path.join(FIGURES_DIR, "06_model_comparison.png")
+    plt.savefig(path, dpi=150, bbox_inches="tight")
     plt.close()
     print(f"[model] Saved: {path}")
 
 
-def _plot_feature_importance(model, feature_names: list) -> None:
-    imp = pd.Series(model.feature_importances_, index=feature_names).sort_values()
-    fig, ax = plt.subplots(figsize=(8, max(5, len(imp) * 0.3)))
-    imp.plot(kind="barh", ax=ax, color="#3B6FE8")
-    ax.set_title("Feature Importances — SchemeImpactNet (Kannan et al. 2022 methodology)")
+def _plot_cv_per_year(all_cv: dict, best_name: str) -> None:
+    """Line chart: R² per year for every algorithm."""
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+    colors = plt.cm.tab10(np.linspace(0, 1, len(all_cv)))
+    for (name, cv), color in zip(all_cv.items(), colors):
+        lw  = 2.5 if name == best_name else 1.2
+        ls  = "-"  if name == best_name else "--"
+        alpha = 1.0 if name == best_name else 0.65
+        axes[0].plot(cv["year"], cv["r2"], marker="o", label=name,
+                     linewidth=lw, linestyle=ls, alpha=alpha, color=color)
+        axes[1].plot(cv["year"], cv["mae"], marker="o", label=name,
+                     linewidth=lw, linestyle=ls, alpha=alpha, color=color)
+
+    for ax in axes:
+        ax.axvspan(2021.5, 2022.5, alpha=0.08, color="red", label="2022 anomaly")
+        ax.axvspan(2019.5, 2020.5, alpha=0.05, color="orange", label="COVID-2020")
+        ax.set_xticks(WF_TEST_YEARS)
+        ax.set_xlabel("Financial Year")
+        ax.legend(fontsize=8)
+
+    axes[0].set_ylabel("R²"); axes[0].set_title("Walk-Forward CV R² by Year")
+    axes[1].set_ylabel("MAE (lakh PD)"); axes[1].set_title("Walk-Forward CV MAE by Year")
+
+    plt.suptitle("All Models — Walk-Forward CV Results", fontsize=12, fontweight="bold")
+    plt.tight_layout()
+    path = os.path.join(FIGURES_DIR, "07_cv_per_year.png")
+    plt.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"[model] Saved: {path}")
+
+
+def _plot_feature_importance(name: str, estimator, features: list) -> None:
+    fi = _get_feature_importance(name, estimator, features)
+    if fi is None:
+        return
+    imp = pd.Series(fi).sort_values()
+    fig, ax = plt.subplots(figsize=(8, max(5, len(imp) * 0.35)))
+    colors = ["#E53935" if imp[f] > imp.quantile(0.75) else "#42A5F5" for f in imp.index]
+    imp.plot(kind="barh", ax=ax, color=colors)
+    ax.set_title(f"Feature Importances — {name} (Best Model)")
     ax.set_xlabel("Importance Score")
     plt.tight_layout()
-    path = os.path.join(FIGURES_DIR, "07_feature_importance.png")
-    plt.savefig(path, bbox_inches="tight")
+    path = os.path.join(FIGURES_DIR, "08_feature_importance.png")
+    plt.savefig(path, dpi=150, bbox_inches="tight")
     plt.close()
     print(f"[model] Saved: {path}")
-
-    print("\n[model] Top 5 features:")
+    print(f"\n[model] Top 5 features ({name}):")
     for feat, val in imp.sort_values(ascending=False).head(5).items():
-        print(f"        {feat:35s}: {val:.4f}")
+        print(f"  {feat:<35}: {val:.4f}")
 
 
-def _save_model_report(model, results: pd.DataFrame, features: list) -> None:
-    path = os.path.join("reports", "model_report.txt")
-    os.makedirs("reports", exist_ok=True)
-    rmse = np.sqrt(mean_squared_error(results[TARGET], results["predicted"]))
-    mae  = mean_absolute_error(results[TARGET], results["predicted"])
-    r2   = r2_score(results[TARGET], results["predicted"])
+def _get_feature_importance(name: str, estimator, features: list):
+    """Extract feature importance — works for tree models and linear models."""
+    if estimator is None:
+        return None
+    try:
+        # Tree-based: direct feature_importances_
+        if hasattr(estimator, "feature_importances_"):
+            return dict(zip(features, estimator.feature_importances_))
+        # Pipeline with tree inside
+        if hasattr(estimator, "named_steps"):
+            inner = list(estimator.named_steps.values())[-1]
+            if hasattr(inner, "feature_importances_"):
+                return dict(zip(features, inner.feature_importances_))
+            if hasattr(inner, "coef_"):
+                return dict(zip(features, np.abs(inner.coef_)))
+        # XGBoost / LightGBM
+        if hasattr(estimator, "feature_importances_"):
+            return dict(zip(features, estimator.feature_importances_))
+    except Exception:
+        pass
+    return None
 
-    with open(path, "w") as f:
-        f.write("SchemeImpactNet — Model Report\n")
-        f.write("=" * 50 + "\n")
-        f.write(f"Model     : {model.__class__.__name__}\n")
-        f.write(f"Test years: {TEST_YEARS}\n")
-        f.write(f"RMSE      : {rmse:.4f}\n")
-        f.write(f"MAE       : {mae:.4f}\n")
-        f.write(f"R2        : {r2:.4f}\n\n")
-        f.write(f"W&B Project : {WANDB_PROJECT}\n")
-        f.write(f"W&B Enabled : {WANDB_ENABLED}\n\n")
-        f.write("Features used:\n")
-        for feat in features:
-            f.write(f"  - {feat}\n")
-    print(f"[model] Report saved → {path}")
+
+# ── Model persistence ─────────────────────────────────────────────────────────
+
+def _save_model(
+    best_name: str,
+    best_estimator,
+    features: list,
+    best_cv: pd.DataFrame,
+    all_cv: dict,
+    df: pd.DataFrame,
+) -> None:
+    ex22 = best_cv[best_cv["year"] != 2022]
+
+    # Build comparison summary for the bundle
+    comparison = {}
+    for name, cv in all_cv.items():
+        e22 = cv[cv["year"] != 2022]
+        comparison[name] = {
+            "mean_r2": round(cv["r2"].mean(), 4),
+            "ex22_r2": round(e22["r2"].mean(), 4),
+            "mean_mae": round(cv["mae"].mean(), 3),
+            "mean_rmse": round(cv["rmse"].mean(), 3),
+        }
+
+    bundle = {
+        "model":              best_estimator,
+        "model_name":         best_name,
+        "features":           features,
+        "target":             TARGET,
+        "covid_multiplier":   1.447,
+        "train_years":        sorted(df["financial_year"].unique().tolist()),
+        "n_districts":        df["district"].nunique(),
+        "n_states":           df["state"].nunique(),
+        "feature_importance": _get_feature_importance(best_name, best_estimator, features),
+        "cv_results":         best_cv.to_dict(),
+        "cv_mean_r2":         round(best_cv["r2"].mean(), 4),
+        "cv_ex22_r2":         round(ex22["r2"].mean(), 4),
+        "cv_mean_mae":        round(best_cv["mae"].mean(), 3),
+        "all_model_comparison": comparison,
+    }
+    with open(MODEL_PATH, "wb") as f:
+        pickle.dump(bundle, f)
+    print(f"\n[model] Model saved → {MODEL_PATH}")
+    print(f"[model] Best: {best_name}  |  ex22 R²={ex22['r2'].mean():.4f}  |  MAE={best_cv['mae'].mean():.3f}L")
 
 
-def _predict_all(model, df: pd.DataFrame, X: pd.DataFrame) -> pd.DataFrame:
-    preds = model.predict(X)
-    out = df[["state", "district", "financial_year", TARGET, "expenditure_lakhs"]].copy()
+def load_model(path: str = MODEL_PATH) -> dict:
+    """Load the saved best model bundle."""
+    with open(path, "rb") as f:
+        bundle = pickle.load(f)
+    print(f"[model] Loaded: {bundle['model_name']} from {path}")
+    print(f"[model] ex22 R²={bundle['cv_ex22_r2']}  |  MAE={bundle['cv_mean_mae']}L")
+    return bundle
+
+
+# ── Prediction helpers ────────────────────────────────────────────────────────
+
+def _predict_all(estimator, df: pd.DataFrame, features: list) -> pd.DataFrame:
+    preds = estimator.predict(df[features].fillna(0))
+    out = df[["state", "district", "financial_year", TARGET]].copy()
     out["predicted_persondays"] = preds.round(3)
     out["prediction_error"]     = (out[TARGET] - out["predicted_persondays"]).round(3)
+    out["abs_error"]            = out["prediction_error"].abs()
     return out
 
 
@@ -395,3 +592,65 @@ def _save_predictions(df: pd.DataFrame) -> None:
     path = os.path.join(OUTPUT_DIR, "mnrega_predictions.csv")
     df.to_csv(path, index=False)
     print(f"[model] Predictions saved → {path}")
+
+
+# ── Report ────────────────────────────────────────────────────────────────────
+
+def _save_model_report(
+    best_name: str,
+    best_cv: pd.DataFrame,
+    all_cv: dict,
+    features: list,
+    best_estimator,
+) -> None:
+    ex22 = best_cv[best_cv["year"] != 2022]
+    path = os.path.join("reports", "model_report.txt")
+    os.makedirs("reports", exist_ok=True)
+    with open(path, "w") as f:
+        f.write("SchemeImpactNet — V4 Model Selection Report\n")
+        f.write("=" * 60 + "\n\n")
+        f.write(f"Best Model    : {best_name}\n")
+        f.write(f"Selection     : max mean R² excl. 2022 (walk-forward CV)\n")
+        f.write(f"Features      : {len(features)}\n")
+        f.write(f"Evaluation    : Walk-forward CV (2018–2024)\n\n")
+
+        f.write("Algorithm Comparison:\n")
+        f.write(f"  {'Model':<20}  {'R²':>8}  {'ex22 R²':>10}  {'MAE':>8}  {'RMSE':>8}\n")
+        f.write(f"  {'-'*60}\n")
+        for name, cv in all_cv.items():
+            e22 = cv[cv["year"] != 2022]
+            marker = " ← BEST" if name == best_name else ""
+            f.write(f"  {name:<20}  {cv['r2'].mean():>8.4f}  "
+                    f"{e22['r2'].mean():>10.4f}  {cv['mae'].mean():>8.3f}  "
+                    f"{cv['rmse'].mean():>8.3f}{marker}\n")
+
+        f.write(f"\nBest Model ({best_name}) Walk-Forward CV:\n")
+        f.write(f"  Mean R²     : {best_cv['r2'].mean():.4f}\n")
+        f.write(f"  excl.2022 R²: {ex22['r2'].mean():.4f}\n")
+        f.write(f"  Mean MAE    : {best_cv['mae'].mean():.3f} lakh\n")
+        f.write(f"  Mean RMSE   : {best_cv['rmse'].mean():.3f} lakh\n")
+        f.write(f"  R² gain     : {best_cv['r2_gain'].mean():+.4f} vs naive lag-1\n\n")
+
+        f.write(f"Previous (leaked) R²: 0.9963\n")
+        f.write(f"Leakage source: works_completed (r=1.0 with target)\n\n")
+        f.write(f"2022 anomaly: West Bengal -93 to -98% reporting drop. Excl. R²={ex22['r2'].mean():.4f}\n\n")
+
+        fi = _get_feature_importance(best_name, best_estimator, features)
+        if fi:
+            f.write("Feature Importances:\n")
+            for feat, val in sorted(fi.items(), key=lambda x: -x[1]):
+                f.write(f"  {feat:<35} {val:.4f}\n")
+
+        f.write(f"\nYear-by-year CV ({best_name}):\n")
+        f.write(best_cv.to_string(index=False))
+    print(f"[model] Report saved → {path}")
+
+
+# ── Feature list helper ───────────────────────────────────────────────────────
+
+def _get_features(df: pd.DataFrame) -> list:
+    available = [f for f in FEATURE_COLS if f in df.columns]
+    missing   = [f for f in FEATURE_COLS if f not in df.columns]
+    if missing:
+        print(f"[model] Warning: {len(missing)} features not in df: {missing}")
+    return available

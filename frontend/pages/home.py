@@ -1,6 +1,5 @@
 # pages/home.py — Landing dashboard.
 
-
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -46,9 +45,7 @@ n_dist    = stats.get("total_districts", "—")
 n_states  = stats.get("total_states", "—")
 yr_range  = stats.get("year_range", "—")
 total_pd  = stats.get("total_persondays_lakhs", 0)
-total_exp = stats.get("total_expenditure_lakhs", 0)
 covid_pct = stats.get("covid_spike_pct", 0)
-exp_cr    = total_exp / 1e4 if total_exp else 0
 
 nat_gain = gain_pct = 0.0
 if not opt_df.empty and "persondays_gain" in opt_df.columns:
@@ -59,11 +56,11 @@ if not opt_df.empty and "persondays_gain" in opt_df.columns:
 # ── KPI strip ─────────────────────────────────────────────────────────────────
 c1, c2, c3, c4, c5 = st.columns(5, gap="small")
 cards = [
-    (str(n_dist),           "Districts",        SAFFRON, ""),
-    (f"{total_pd:,.0f}L",   "Person-Days",      "#1C1917", "historical total"),
-    (f"₹{exp_cr:,.0f}Cr",   "Fiscal Envelope",  "#1C1917", ""),
-    (f"{covid_pct:+.1f}%",  "COVID-20 Spike",   RED,     "2020 peak"),
-    (f"{gain_pct:+.2f}%",   "LP Opt. Gain",     GREEN,   "budget-neutral"),
+    (str(n_dist),          "Districts",       SAFFRON,  ""),
+    (str(n_states),        "States / UTs",    "#1C1917", ""),
+    (f"{total_pd:,.0f}L",  "Person-Days",     "#1C1917", "historical total"),
+    (f"{covid_pct:+.1f}%", "COVID-20 Spike",  RED,      "2020 peak"),
+    (f"{gain_pct:+.2f}%",  "LP Opt. Gain",    GREEN,    "budget-neutral"),
 ]
 for col, (val, label, color, note) in zip([c1, c2, c3, c4, c5], cards):
     with col:
@@ -103,10 +100,10 @@ with left:
             pred_df[pred_df["financial_year"] == ly]
             .groupby("state", as_index=False)
             .agg(
-                pd_sum    =("person_days_lakhs",  "sum"),
-                pred_sum  =("predicted_persondays","sum"),
-                n_dist    =("district",           "count"),
-                avg_err   =("prediction_error",   "mean"),
+                pd_sum   =("person_days_lakhs",   "sum"),
+                pred_sum =("predicted_persondays", "sum"),
+                n_dist   =("district",             "count"),
+                avg_err  =("prediction_error",     "mean"),
             )
         )
 
@@ -175,7 +172,6 @@ with left:
 with right:
     section_label("Intelligence Brief")
 
-    # Compute signals from data
     n_declining = n_underfunded = 0
     top_state   = "—"
     if not pred_df.empty:
@@ -221,10 +217,10 @@ with right:
 
     section_label("Live Signals")
     signals = [
-        (str(n_declining),   "High-Risk Districts",     "Predicted employment decline",    RED),
-        (str(n_underfunded), "Underfunded · High Eff.", "Bottom-tercile budget",           AMBER),
-        (gain_str,           "LP Reallocation Gain",    f"Budget-neutral · {gain_pct:+.2f}%", GREEN),
-        (str(n_dist),        "Districts in Model",      "XGBoost · R²≈0.9963",            SAFFRON),
+        (str(n_declining),   "High-Risk Districts",     "Predicted employment decline",          RED),
+        (str(n_underfunded), "Underfunded · High Eff.", "Bottom-tercile budget",                 AMBER),
+        (gain_str,           "LP Reallocation Gain",    f"Budget-neutral · {gain_pct:+.2f}%",    GREEN),
+        (str(n_dist),        "Districts in Model",      "GBR · Walk-fwd CV R²≈0.91",             SAFFRON),
     ]
     for val, title, body, accent in signals:
         st.markdown(signal_card_html(val, title, body, accent), unsafe_allow_html=True)

@@ -2,6 +2,9 @@
 schemas.py
 ----------
 Pydantic schemas for API request/response validation.
+
+V3 update: expenditure_lakhs, expenditure_per_personday, demand_fulfillment_rate
+removed from DistrictSummary — synthetic columns dropped in leak-free pipeline.
 """
 
 from pydantic import BaseModel
@@ -13,10 +16,7 @@ class DistrictSummary(BaseModel):
     district: str
     financial_year: int
     person_days_lakhs: float
-    expenditure_lakhs: float
     avg_wage_rate: float
-    expenditure_per_personday: Optional[float]
-    demand_fulfillment_rate: Optional[float]
 
     class Config:
         from_attributes = True
@@ -52,8 +52,8 @@ class OptimizerOut(BaseModel):
 
 
 class OptimizerRequest(BaseModel):
-    state: Optional[str] = None          # None = All-India
-    budget_scale: float = 1.0            # 1.0 = same budget, 1.1 = +10%, etc.
+    state: Optional[str] = None
+    budget_scale: float = 1.0
     min_fraction: float = 0.40
     max_fraction: float = 2.50
 
@@ -73,5 +73,5 @@ class StatsOut(BaseModel):
     total_states: int
     year_range: str
     total_persondays_lakhs: float
-    total_expenditure_lakhs: float
+    total_expenditure_lakhs: float   # kept for API compat, always 0.0 in V3
     covid_spike_pct: float
