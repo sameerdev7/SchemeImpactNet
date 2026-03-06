@@ -238,3 +238,7 @@ with tab2:
 
                 with st.expander("📋 Full Live Results Table"):
                     st.dataframe(dist_df.round(3), use_container_width=True, hide_index=True)
+
+
+from utils.ai_summary import render_ai_summary 
+render_ai_summary("overview", state_param=state_param)

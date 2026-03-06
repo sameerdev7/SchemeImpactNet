@@ -162,3 +162,9 @@ with st.expander("📋 Raw Data Table"):
         "financial_year", "person_days_lakhs", "avg_wage_rate",
     ] if c in df.columns]
     st.dataframe(df[display_cols].round(3), use_container_width=True, hide_index=True)
+
+
+
+from utils.ai_summary import render_ai_summary
+state_param = state  # state is already defined from the selectbox above
+render_ai_summary("districts", state_param=state_param)

@@ -157,3 +157,7 @@ if not df_top.empty:
     st.plotly_chart(fig2, use_container_width=True, config={"displayModeBar": False})
 else:
     st.info("No ranking data available.")
+
+
+from utils.ai_summary import render_ai_summary 
+render_ai_summary("overview", state_param=state_param)

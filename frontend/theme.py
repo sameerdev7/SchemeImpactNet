@@ -116,6 +116,7 @@ p  { font-family: 'Source Serif 4', serif !important; color: #292524 !important;
 }
 .stButton > button:hover {
     background: #FB923C !important;
+    color: #1C1917 !important;
 }
 
 /* ── Dataframes ── */

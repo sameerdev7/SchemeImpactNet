@@ -276,3 +276,6 @@ if not trend.empty:
     ))
     fig_t.update_layout(**l_t)
     st.plotly_chart(fig_t, width="stretch", config={"displayModeBar": False})
+
+from utils.ai_summary import render_ai_summary 
+render_ai_summary("overview", state_param=state_param)

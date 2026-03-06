@@ -253,3 +253,7 @@ worst = (
     .round(3)
 )
 st.dataframe(worst, use_container_width=True, hide_index=True)
+
+
+from utils.ai_summary import render_ai_summary 
+render_ai_summary("overview", state_param=state_param)

@@ -14,6 +14,7 @@ from theme import (
 from utils.api_client import (
     is_online, fetch_stats, fetch_predictions, fetch_optimizer_results,
 )
+from utils.gemini_utils import build_context, call_gemini, preset_prompt
 
 inject_theme()
 
@@ -168,14 +169,15 @@ with left:
     else:
         st.info("Start the backend to load state-level data.")
 
-# ── RIGHT: brief + signals ────────────────────────────────────────────────────
+# ── RIGHT: Intelligence Brief + signals ───────────────────────────────────────
 with right:
-    section_label("Intelligence Brief")
-
+    # Derive signal numbers
     n_declining = n_underfunded = 0
     top_state   = "—"
+    ly_label    = pred_df["financial_year"].max() if not pred_df.empty else "—"
+
     if not pred_df.empty:
-        ly = pred_df["financial_year"].max()
+        ly  = pred_df["financial_year"].max()
         lat = pred_df[pred_df["financial_year"] == ly]
         prv = pred_df[pred_df["financial_year"] == ly - 1]
         if not prv.empty:
@@ -194,9 +196,33 @@ with right:
         top_state = opt_df.groupby("state")["persondays_gain"].sum().idxmax()
 
     gain_str = f"{nat_gain:+,.1f}L" if nat_gain else "—"
-    ly_label = pred_df["financial_year"].max() if not pred_df.empty else "—"
 
-    st.markdown(f"""
+    # ── Intelligence Brief: AI or manual fallback ─────────────────────────────
+    section_label("Intelligence Brief")
+    api_key = st.session_state.get("gemini_api_key", "")
+
+    if api_key:
+        cache_key = "home_brief"
+        if cache_key not in st.session_state:
+            with st.spinner("Generating AI brief..."):
+                ctx    = build_context(None)
+                prompt = preset_prompt(ctx, "summary")
+                st.session_state[cache_key] = call_gemini(api_key, prompt, temperature=0.3)
+
+        st.markdown(f"""
+<div style="background:#FFF7ED; border:1px solid #FED7AA; border-left:3px solid #FB923C;
+            border-radius:8px; padding:1.2rem 1.4rem; margin-bottom:1rem;">
+  <p style="font-family:'DM Mono',monospace; font-size:0.56rem; letter-spacing:2.5px;
+            text-transform:uppercase; color:#FB923C; margin:0 0 9px 0;">
+    ◈ AI Generated · Gemini 2.5 Flash Lite · FY {ly_label}</p>
+  <p style="font-family:'Source Serif 4',serif; font-size:0.88rem; color:#431407;
+            line-height:1.75; margin:0;">{st.session_state[cache_key]}</p>
+</div>
+""", unsafe_allow_html=True)
+
+    else:
+        # Manual fallback when no Gemini key
+        st.markdown(f"""
 <div style="background:#FFF7ED; border:1px solid #FED7AA; border-left:3px solid #FB923C;
             border-radius:8px; padding:1.2rem 1.4rem; margin-bottom:1rem;">
   <p style="font-family:'DM Mono',monospace; font-size:0.56rem; letter-spacing:2.5px;
@@ -215,6 +241,7 @@ with right:
 </div>
 """, unsafe_allow_html=True)
 
+    # ── Live Signals ──────────────────────────────────────────────────────────
     section_label("Live Signals")
     signals = [
         (str(n_declining),   "High-Risk Districts",     "Predicted employment decline",          RED),

@@ -489,3 +489,7 @@ c1.metric("Total Predicted PD", f"{total_pred:,.1f}L")
 c2.metric("Total Actual PD",    f"{total_act:,.1f}L")
 c3.metric("Mean Model Error",   f"{mean_err:+.3f}L")
 c4.metric("Total LP Gain",      f"{gain_total:+,.1f}L")
+
+from utils.ai_summary import render_ai_summary 
+state_param = None if state_filter == "All India" else state_filter
+render_ai_summary("spatial", state_param=state_param)

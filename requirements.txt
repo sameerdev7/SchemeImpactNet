@@ -28,3 +28,4 @@ streamlit
 plotly>=5.17.0
 requests>=2.31.0
 
+google-generativeai>=0.7.0
