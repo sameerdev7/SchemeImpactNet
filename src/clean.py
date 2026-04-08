@@ -2,7 +2,6 @@
 clean.py
 --------
 Cleans and standardizes the unified MNREGA dataset.
-Works for Stage 1 (Maharashtra) through Stage 3 (All-India + scheme data).
 """
 
 import pandas as pd
@@ -38,7 +37,6 @@ def _strip_strings(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _parse_financial_year(df: pd.DataFrame) -> pd.DataFrame:
-    """Convert '2018-19' → integer 2018."""
     def _parse(val):
         val = str(val).strip()
         return int(val.split("-")[0]) if "-" in val else int(val)
@@ -49,18 +47,13 @@ def _parse_financial_year(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _cast_numerics(df: pd.DataFrame) -> pd.DataFrame:
-    all_numeric = CRITICAL_COLS + NON_CRITICAL_COLS
-    for col in all_numeric:
+    for col in CRITICAL_COLS + NON_CRITICAL_COLS:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
 
 
 def _handle_missing(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Critical cols   → forward-fill within district, drop if still null.
-    Non-critical    → forward-fill within district, leave remaining NaN.
-    """
     df = df.sort_values(["state", "district", "financial_year"])
 
     for col in CRITICAL_COLS + NON_CRITICAL_COLS:
@@ -82,7 +75,6 @@ def _handle_missing(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _enforce_logical_constraints(df: pd.DataFrame) -> pd.DataFrame:
-    """Clip any constraint violations that slipped through generation."""
     if all(c in df.columns for c in ["households_offered", "households_demanded"]):
         violations = (df["households_offered"] > df["households_demanded"]).sum()
         if violations:

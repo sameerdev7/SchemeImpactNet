@@ -1,14 +1,10 @@
 """
 fix_optimizer.py
 ----------------
-Standalone script to re-run the two-stage proportional-LP optimizer.
-
-Run this AFTER replacing src/optimize.py to regenerate
-data/processed/optimized_budget_allocation.csv with realistic
-continuous budget_change_pct values (instead of bang-bang -60%/+150%).
+Standalone script to re-run the optimizer and regenerate
+data/processed/optimized_budget_allocation.csv.
 
 Usage:
-    cd SchemeImpactNet/
     python fix_optimizer.py
 
 Then reseed the database:
@@ -23,13 +19,13 @@ from src.optimize import run_optimizer
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("SchemeImpactNet — Optimizer Fix (v2 Proportional-LP)")
+    print("SchemeImpactNet — Optimizer Fix")
     print("=" * 60)
 
     result = run_optimizer(
         predictions_path="data/processed/mnrega_predictions.csv",
         raw_path="data/raw/mnrega_real_data_final_clean.csv",
-        scope_state=None,     # All-India
+        scope_state=None,
         target_year=2024,
     )
 

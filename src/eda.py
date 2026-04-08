@@ -2,7 +2,6 @@
 eda.py
 ------
 Exploratory Data Analysis for MNREGA unified dataset.
-Automatically adapts to Maharashtra-only or All-India data.
 
 Figures produced:
     01_statewide_trend.png
@@ -25,7 +24,7 @@ os.makedirs(FIGURES_DIR, exist_ok=True)
 sns.set_theme(style="whitegrid", palette="muted")
 plt.rcParams.update({"figure.dpi": 120, "font.size": 10})
 
-# Use a font that supports the rupee symbol if available, else fallback
+
 def _get_font():
     available = [f.name for f in fm.fontManager.ttflist]
     for font in ["DejaVu Sans", "FreeSans", "Liberation Sans", "Arial"]:
@@ -33,12 +32,13 @@ def _get_font():
             return font
     return None
 
+
 FONT = _get_font()
 if FONT:
     plt.rcParams["font.family"] = FONT
 
 
-def run_eda(df: pd.DataFrame, scope: str = "Maharashtra") -> None:
+def run_eda(df: pd.DataFrame, scope: str = "All-India") -> None:
     print(f"\n[eda] Starting EDA — scope: {scope}")
     _summary_stats(df)
     _plot_trend(df, scope)
@@ -48,8 +48,6 @@ def run_eda(df: pd.DataFrame, scope: str = "Maharashtra") -> None:
     _plot_correlation_heatmap(df)
     print(f"[eda] All figures saved to: {FIGURES_DIR}/")
 
-
-# ── 1. Summary ────────────────────────────────────────────────────────────────
 
 def _summary_stats(df: pd.DataFrame) -> None:
     print(f"\n[eda] {'─'*50}")
@@ -70,8 +68,6 @@ def _summary_stats(df: pd.DataFrame) -> None:
     print(f"[eda] {'─'*50}")
 
 
-# ── 2. Trend ──────────────────────────────────────────────────────────────────
-
 def _plot_trend(df: pd.DataFrame, scope: str) -> None:
     yearly = df.groupby("financial_year").agg(
         total_persondays=("person_days_lakhs", "sum"),
@@ -87,8 +83,6 @@ def _plot_trend(df: pd.DataFrame, scope: str) -> None:
     fig.tight_layout()
     _save("01_statewide_trend.png")
 
-
-# ── 3. District rankings ──────────────────────────────────────────────────────
 
 def _plot_top_bottom_districts(df: pd.DataFrame, scope: str) -> None:
     avg = df.groupby("district")["person_days_lakhs"].mean().sort_values(ascending=False)
@@ -119,11 +113,9 @@ def _plot_top_bottom_districts(df: pd.DataFrame, scope: str) -> None:
         print(f"      {d:35s}: {v:.2f} lakh")
 
 
-# ── 4. Efficiency ranking ─────────────────────────────────────────────────────
-
 def _plot_efficiency_ranking(df: pd.DataFrame, scope: str) -> None:
     if "expenditure_per_personday" not in df.columns:
-        print("[eda] Skipping efficiency ranking — expenditure_per_personday not in V3 features")
+        print("[eda] Skipping efficiency ranking — expenditure_per_personday not available")
         return
     eff = (
         df.groupby("district")["expenditure_per_personday"]
@@ -145,15 +137,11 @@ def _plot_efficiency_ranking(df: pd.DataFrame, scope: str) -> None:
     print(f"[eda] Least efficient: {eff.idxmax()} ({eff.max():.1f})")
 
 
-# ── 5. COVID impact ───────────────────────────────────────────────────────────
-
 def _plot_covid_impact(df: pd.DataFrame) -> None:
     pre  = df[df["financial_year"] == 2019].groupby("district")["person_days_lakhs"].mean()
     post = df[df["financial_year"] == 2020].groupby("district")["person_days_lakhs"].mean()
     common = pre.index.intersection(post.index)
     change = ((post[common] - pre[common]) / pre[common] * 100).sort_values(ascending=False)
-
-    # Cap at 20 districts for readability
     show = pd.concat([change.head(10), change.tail(10)]) if len(change) > 20 else change
 
     fig, ax = plt.subplots(figsize=(10, max(6, len(show) * 0.35)))
@@ -165,11 +153,9 @@ def _plot_covid_impact(df: pd.DataFrame) -> None:
     plt.tight_layout()
     _save("04_covid_impact.png")
 
-    print(f"\n[eda] COVID — biggest spike   : {change.idxmax()} (+{change.max():.1f}%)")
-    print(f"[eda] COVID — least impacted  : {change.idxmin()} ({change.min():.1f}%)")
+    print(f"\n[eda] COVID — biggest spike  : {change.idxmax()} (+{change.max():.1f}%)")
+    print(f"[eda] COVID — least impacted : {change.idxmin()} ({change.min():.1f}%)")
 
-
-# ── 6. Correlation heatmap ────────────────────────────────────────────────────
 
 def _plot_correlation_heatmap(df: pd.DataFrame) -> None:
     candidates = [
@@ -191,8 +177,6 @@ def _plot_correlation_heatmap(df: pd.DataFrame) -> None:
     plt.tight_layout()
     _save("05_correlation_heatmap.png")
 
-
-# ── Helper ────────────────────────────────────────────────────────────────────
 
 def _save(filename: str) -> None:
     path = os.path.join(FIGURES_DIR, filename)

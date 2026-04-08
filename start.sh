@@ -9,25 +9,20 @@
 #    --frontend-only   Start only the Streamlit frontend
 #    --port-backend N  Backend port (default: 8000)
 #    --port-frontend N Frontend port (default: 8501)
-#    --stage N         Pipeline stage to run if needed (1|2|3, default: 3)
 # ============================================================
 
 set -euo pipefail
 
-# ── Defaults ──────────────────────────────────────────────────────────────────
 BACKEND_PORT=8000
 FRONTEND_PORT=8501
-PIPELINE_STAGE=3
 SKIP_PIPELINE=false
 BACKEND_ONLY=false
 FRONTEND_ONLY=false
 BACKEND_PID=""
 FRONTEND_PID=""
 
-# ── Always resolve project root (where this script lives) ─────────────────────
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# ── Colours ───────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 AMBER='\033[0;33m'
@@ -35,12 +30,11 @@ BLUE='\033[0;34m'
 BOLD='\033[1m'
 RESET='\033[0m'
 ok() { echo -e "${GREEN}  ✓${RESET}  $*"; }
-info() { echo -e "${BLUE}  →${RESET}  $*"; }
+info() { echo -e "${BLUE}  ->  $*"; }
 warn() { echo -e "${AMBER}  ⚠${RESET}  $*"; }
 err() { echo -e "${RED}  ✗${RESET}  $*"; }
 hr() { echo -e "${BOLD}──────────────────────────────────────────────────${RESET}"; }
 
-# ── Arg parsing ───────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
   case $1 in
   --skip-pipeline) SKIP_PIPELINE=true ;;
@@ -54,16 +48,11 @@ while [[ $# -gt 0 ]]; do
     FRONTEND_PORT="$2"
     shift
     ;;
-  --stage)
-    PIPELINE_STAGE="$2"
-    shift
-    ;;
   *) warn "Unknown option: $1" ;;
   esac
   shift
 done
 
-# ── Cleanup handler ───────────────────────────────────────────────────────────
 cleanup() {
   echo ""
   hr
@@ -74,13 +63,11 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# ── Banner ────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}  ◈  SchemeImpactNet — Service Manager${RESET}"
 hr
 echo ""
 
-# ── Prerequisite checks ───────────────────────────────────────────────────────
 info "Checking prerequisites…"
 
 if ! command -v python &>/dev/null && ! command -v python3 &>/dev/null; then
@@ -88,7 +75,7 @@ if ! command -v python &>/dev/null && ! command -v python3 &>/dev/null; then
   exit 1
 fi
 PYTHON=$(command -v python3 2>/dev/null || command -v python)
-ok "Python → $($PYTHON --version 2>&1)"
+ok "Python -> $($PYTHON --version 2>&1)"
 
 if ! $PYTHON -m uvicorn --version &>/dev/null; then
   warn "uvicorn not found — attempting install…"
@@ -116,21 +103,17 @@ if [[ "$STREAMLIT_MAJOR" -lt 1 ]] || { [[ "$STREAMLIT_MAJOR" -eq 1 ]] && [[ "$ST
   warn "  pip install --upgrade streamlit"
 fi
 
-if [[ ! -f "$PROJECT_ROOT/frontend/app.py" ]]; then
-  err "frontend/app.py not found at $PROJECT_ROOT/frontend/app.py"
+[[ ! -f "$PROJECT_ROOT/frontend/app.py" ]] && {
+  err "frontend/app.py not found"
   exit 1
-fi
-ok "frontend/app.py found"
-
-if [[ ! -f "$PROJECT_ROOT/backend/main.py" ]]; then
-  err "backend/main.py not found at $PROJECT_ROOT/backend/main.py"
+}
+[[ ! -f "$PROJECT_ROOT/backend/main.py" ]] && {
+  err "backend/main.py not found"
   exit 1
-fi
-ok "backend/main.py found"
-
+}
+ok "frontend/app.py and backend/main.py found"
 echo ""
 
-# ── Data pipeline ─────────────────────────────────────────────────────────────
 if [[ "$FRONTEND_ONLY" == false && "$SKIP_PIPELINE" == false ]]; then
   PROCESSED_FILES=(
     "$PROJECT_ROOT/data/processed/mnrega_cleaned.csv"
@@ -140,20 +123,16 @@ if [[ "$FRONTEND_ONLY" == false && "$SKIP_PIPELINE" == false ]]; then
 
   MISSING=false
   for f in "${PROCESSED_FILES[@]}"; do
-    if [[ ! -f "$f" ]]; then
-      warn "Missing: $f"
-      MISSING=true
-    fi
+    [[ ! -f "$f" ]] && warn "Missing: $f" && MISSING=true
   done
 
   if [[ "$MISSING" == true ]]; then
     hr
-    info "Processed data not found — running Stage $PIPELINE_STAGE pipeline…"
-    info "This may take several minutes on first run."
+    info "Processed data not found — running pipeline…"
     hr
     echo ""
-    cd "$PROJECT_ROOT" && $PYTHON main.py --stage "$PIPELINE_STAGE" || {
-      err "Pipeline failed. Check errors above."
+    cd "$PROJECT_ROOT" && $PYTHON main.py || {
+      err "Pipeline failed."
       exit 1
     }
     echo ""
@@ -169,16 +148,14 @@ if [[ "$FRONTEND_ONLY" == false && "$SKIP_PIPELINE" == false ]]; then
   fi
 fi
 
-# ── Start backend ─────────────────────────────────────────────────────────────
 if [[ "$FRONTEND_ONLY" == false ]]; then
   if lsof -i ":$BACKEND_PORT" &>/dev/null 2>&1; then
-    warn "Port $BACKEND_PORT already in use — stopping existing process…"
+    warn "Port $BACKEND_PORT in use — stopping existing process…"
     lsof -ti ":$BACKEND_PORT" | xargs kill -9 2>/dev/null || true
     sleep 1
   fi
 
   info "Starting FastAPI backend on port $BACKEND_PORT…"
-  # Backend must run from project root so 'backend.main' import resolves
   (cd "$PROJECT_ROOT" && $PYTHON -m uvicorn backend.main:app \
     --host 0.0.0.0 \
     --port "$BACKEND_PORT" \
@@ -193,19 +170,18 @@ if [[ "$FRONTEND_ONLY" == false ]]; then
   until curl -sf "http://localhost:$BACKEND_PORT/health" &>/dev/null; do
     sleep 1
     WAITED=$((WAITED + 1))
-    if [[ $WAITED -ge $MAX_WAIT ]]; then
-      warn "Backend health check timed out after ${MAX_WAIT}s — continuing anyway"
+    [[ $WAITED -ge $MAX_WAIT ]] && {
+      warn "Backend health timeout — continuing"
       break
-    fi
+    }
   done
-  curl -sf "http://localhost:$BACKEND_PORT/health" &>/dev/null && ok "Backend live → http://localhost:$BACKEND_PORT"
+  curl -sf "http://localhost:$BACKEND_PORT/health" &>/dev/null && ok "Backend live -> http://localhost:$BACKEND_PORT"
   echo ""
 fi
 
-# ── Start frontend ────────────────────────────────────────────────────────────
 if [[ "$BACKEND_ONLY" == false ]]; then
   if lsof -i ":$FRONTEND_PORT" &>/dev/null 2>&1; then
-    warn "Port $FRONTEND_PORT already in use — stopping existing process…"
+    warn "Port $FRONTEND_PORT in use — stopping existing process…"
     lsof -ti ":$FRONTEND_PORT" | xargs kill -9 2>/dev/null || true
     sleep 1
   fi
@@ -215,13 +191,11 @@ if [[ "$BACKEND_ONLY" == false ]]; then
   $PYTHON -m streamlit run app.py --server.port "$FRONTEND_PORT" --server.headless true --browser.gatherUsageStats false &
   FRONTEND_PID=$!
   cd "$PROJECT_ROOT"
-
   sleep 2
-  ok "Frontend live → http://localhost:$FRONTEND_PORT"
+  ok "Frontend live -> http://localhost:$FRONTEND_PORT"
   echo ""
 fi
 
-# ── Ready banner ──────────────────────────────────────────────────────────────
 hr
 echo ""
 echo -e "${BOLD}  ◈  SchemeImpactNet is running${RESET}"
@@ -235,5 +209,4 @@ echo ""
 hr
 echo ""
 
-# ── Keep alive ────────────────────────────────────────────────────────────────
 wait

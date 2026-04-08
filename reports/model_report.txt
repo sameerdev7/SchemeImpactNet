@@ -1,4 +1,4 @@
-SchemeImpactNet — V4 Model Selection Report
+SchemeImpactNet — Model Selection Report
 ============================================================
 
 Best Model    : GradientBoosting
@@ -9,7 +9,7 @@ Evaluation    : Walk-forward CV (2018–2024)
 Algorithm Comparison:
   Model                       R²     ex22 R²       MAE      RMSE
   ------------------------------------------------------------
-  GradientBoosting        0.8510      0.9078     8.554    16.334 ← BEST
+  GradientBoosting        0.8510      0.9078     8.554    16.334 <- BEST
   RandomForest            0.8417      0.9063     8.739    16.679
   Ridge                   0.8018      0.8824     9.975    18.545
   ElasticNet              0.7982      0.8811     9.890    18.678
@@ -22,10 +22,7 @@ Best Model (GradientBoosting) Walk-Forward CV:
   Mean RMSE   : 16.334 lakh
   R² gain     : +0.0737 vs naive lag-1
 
-Previous (leaked) R²: 0.9963
-Leakage source: works_completed (r=1.0 with target)
-
-2022 anomaly: West Bengal -93 to -98% reporting drop. Excl. R²=0.9078
+2022 anomaly: West Bengal -93 to -98% reporting drop.
 
 Feature Importances:
   lag1_pd                             0.5270
