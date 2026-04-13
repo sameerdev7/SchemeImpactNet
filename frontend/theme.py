@@ -108,15 +108,15 @@ p  { font-family: 'Source Serif 4', serif !important; color: #292524 !important;
     font-size: 0.7rem !important;
     letter-spacing: 1px !important;
     text-transform: uppercase !important;
-    background: #1C1917 !important;
-    color: #FAF9F7 !important;
+    background: #FB923C !important;
+    color: #1C1917 !important;
     border: none !important;
     border-radius: 6px !important;
     padding: 0.5rem 1.2rem !important;
 }
 .stButton > button:hover {
-    background: #FB923C !important;
-    color: #1C1917 !important;
+    background: #EA580C !important;
+    color: #FFFFFF !important;
 }
 
 /* ── Dataframes ── */

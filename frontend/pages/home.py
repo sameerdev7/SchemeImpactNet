@@ -117,22 +117,27 @@ with left:
             szs.append(float(r["pd_sum"]))
 
         mn, mx = min(szs), max(szs)
-        bsz = [float(np.clip((v - mn) / (mx - mn + 1e-9) * 14 + 5, 5, 19)) for v in szs]
+        bsz = [float(np.clip((v - mn) / (mx - mn + 1e-9) * 14 + 9, 9, 23)) for v in szs]
 
         fig = go.Figure()
         fig.add_scattergeo(
             lat=lats, lon=lons, mode="markers",
             marker=dict(
                 size=bsz, color=szs,
-                colorscale=SAFFRON_SCALE,
+                colorscale=[
+                        [0.0,  "#F97316"],
+                        [0.33, "#EA580C"],
+                        [0.66, "#C2410C"],
+                        [1.0,  "#7C2D12"],
+                        ],
                 colorbar=dict(
                     title=dict(text="Lakh PD", font=dict(color="#78716C", size=9)),
                     tickfont=dict(color="#78716C", size=8),
                     thickness=8, len=0.45,
                     bgcolor="rgba(255,255,255,0.85)",
                 ),
-                opacity=0.88,
-                line=dict(width=1, color="#FFFFFF"),
+                opacity=1.0,
+                line=dict(width=1.5, color="#FFFFFF"),
             ),
             text=agg["state"],
             customdata=list(zip(
